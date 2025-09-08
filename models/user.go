@@ -12,7 +12,7 @@ type User struct {
 
 // LoginRequest represents login credentials
 type LoginRequest struct {
-	Username string `json:"username"`
+	Email string `json:"email"`
 	Password string `json:"password"`
 }
 

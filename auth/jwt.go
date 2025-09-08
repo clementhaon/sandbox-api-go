@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"sandbox-api-go/models"
 	"time"
-
+	"sandbox-api-go/config"
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var jwtSecret = []byte("votre-secret-super-securise-ici") // En prod, utilisez une variable d'environnement
+// Récupération de la clé secrète JWT à partir des variables d'environnement
+var jwtSecret = []byte(config.GetEnv("JWT_SECRET", "votre-secret-super-securise-ici"))
 
 // GenerateToken génère un token JWT pour un utilisateur
 func GenerateToken(user models.User) (string, error) {

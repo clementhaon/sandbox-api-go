@@ -1,0 +1,32 @@
+# Fichiers Git
+.git
+.gitignore
+
+# Fichiers de documentation
+README.md
+*.md
+
+# Fichiers de test
+*_test.go
+test_*.sh
+
+# Fichiers Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Fichiers de base de données
+*.db
+*.sqlite
+
+# Fichiers temporaires
+*.tmp
+*.log
+
+# Fichiers de build
+bin/
+dist/
+
+# Fichiers d'environnement
+.env
+.env.local
