@@ -2,9 +2,10 @@ package middleware
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"sandbox-api-go/auth"
+	"sandbox-api-go/errors"
+	"sandbox-api-go/logger"
 	"strings"
 )
 
@@ -13,8 +14,8 @@ type contextKey string
 const UserContextKey contextKey = "user"
 
 // AuthMiddleware vérifie le token JWT dans les requêtes
-func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func AuthMiddleware(handler ErrorHandler) http.HandlerFunc {
+	return ErrorMiddleware(func(w http.ResponseWriter, r *http.Request) error {
 		var token string
 
 		// Essayer de récupérer le token depuis le cookie d'abord
@@ -24,23 +25,19 @@ func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			// Fallback : récupérer le token depuis l'en-tête Authorization
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusUnauthorized)
-				json.NewEncoder(w).Encode(map[string]string{
-					"error": "Token d'authentification requis (cookie ou header)",
+				logger.WarnContext(r.Context(), "Authentication attempt without token")
+				return errors.NewAuthRequiredError().WithDetails(map[string]interface{}{
+					"message": "Token required in cookie or Authorization header",
 				})
-				return
 			}
 
 			// Vérifier le format "Bearer <token>"
 			tokenParts := strings.Split(authHeader, " ")
 			if len(tokenParts) != 2 || tokenParts[0] != "Bearer" {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusUnauthorized)
-				json.NewEncoder(w).Encode(map[string]string{
-					"error": "Format de token invalide. Utilisez 'Bearer <token>'",
+				logger.WarnContext(r.Context(), "Invalid token format in Authorization header")
+				return errors.NewInvalidTokenError().WithDetails(map[string]interface{}{
+					"expected_format": "Bearer <token>",
 				})
-				return
 			}
 			token = tokenParts[1]
 		}
@@ -48,16 +45,16 @@ func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// Valider le token
 		claims, err := auth.ValidateToken(token)
 		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{
-				"error": "Token invalide ou expiré",
+			logger.WarnContext(r.Context(), "Invalid or expired token", map[string]interface{}{
+				"error": err.Error(),
 			})
-			return
+			return errors.NewInvalidTokenError().WithCause(err)
 		}
 
 		// Ajouter les informations utilisateur au contexte
 		ctx := context.WithValue(r.Context(), UserContextKey, claims)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	}
+		ctx = context.WithValue(ctx, logger.UserIDKey, claims.UserID)
+		
+		return handler(w, r.WithContext(ctx))
+	})
 } 

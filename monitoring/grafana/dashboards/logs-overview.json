@@ -1,0 +1,73 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Sandbox API Logs",
+    "tags": ["api", "logs"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "title": "Error Logs",
+        "type": "logs",
+        "targets": [
+          {
+            "expr": "{job=\"sandbox-api\"} |= \"ERROR\"",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
+        "options": {
+          "showTime": true,
+          "showLabels": true,
+          "sortOrder": "Descending"
+        }
+      },
+      {
+        "title": "Recent API Logs",
+        "type": "logs",
+        "targets": [
+          {
+            "expr": "{job=\"sandbox-api\"}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 12, "w": 24, "x": 0, "y": 8},
+        "options": {
+          "showTime": true,
+          "showLabels": false,
+          "sortOrder": "Descending"
+        }
+      },
+      {
+        "title": "Log Levels Distribution",
+        "type": "bargauge",
+        "targets": [
+          {
+            "expr": "sum(count_over_time({job=\"sandbox-api\"} | json [5m])) by (level)",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+        "options": {
+          "orientation": "horizontal"
+        }
+      },
+      {
+        "title": "Error Rate Over Time",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum(rate({job=\"sandbox-api\"} |= \"ERROR\" [5m]))",
+            "legendFormat": "Error Rate",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20}
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "10s"
+  }
+}

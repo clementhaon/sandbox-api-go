@@ -4,32 +4,63 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"sandbox-api-go/database"
 	"sandbox-api-go/handlers"
 	"sandbox-api-go/middleware"
+	"sandbox-api-go/logger"
+	"sandbox-api-go/errors"
+	"sandbox-api-go/metrics"
 	"syscall"
 	"time"
+	
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
+	// Initialize logger first
+	logger.Initialize()
+	logger.Info("Starting sandbox-api-go application")
+	
+	// Initialize metrics
+	metrics.InitAppInfo("2.0.0", "dev", time.Now().Format("2006-01-02"), runtime.Version())
+
 	// Initialisation de la base de données
 	if err := database.InitDB(); err != nil {
-		log.Fatalf("❌ Erreur lors de l'initialisation de la base de données: %v", err)
+		logger.Fatal("Failed to initialize database", err)
 	}
 	defer database.CloseDB()
 
-	// Création du serveur HTTP
+	// Création du serveur HTTP avec middleware de gestion d'erreurs
 	server := &http.Server{
 		Addr:    ":8080",
-		Handler: createMux(),
+		Handler: middleware.PanicRecoveryMiddleware(middleware.RequestLoggingMiddleware(createMux())),
 	}
 
 	// Démarrage du serveur dans une goroutine
 	go func() {
+		logger.Info("Server starting", map[string]interface{}{
+			"port": "8080",
+			"endpoints": map[string]interface{}{
+				"public": []string{
+					"POST /auth/register",
+					"POST /auth/login",
+					"POST /auth/logout",
+				},
+				"authenticated": []string{
+					"GET /auth/user",
+					"GET /api/tasks",
+					"POST /api/tasks",
+					"GET /api/tasks/{id}",
+					"PUT /api/tasks/{id}",
+					"DELETE /api/tasks/{id}",
+				},
+			},
+		})
+		
 		fmt.Println("🚀 Serveur API REST avec authentification démarré sur http://localhost:8080")
 		fmt.Println("📋 Endpoints disponibles:")
 		fmt.Println("  Authentification (publique):")
@@ -46,7 +77,7 @@ func main() {
 		fmt.Println("🗄️  Base de données PostgreSQL connectée")
 
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("❌ Erreur lors du démarrage du serveur: %v", err)
+			logger.Fatal("Failed to start server", err)
 		}
 	}()
 
@@ -55,6 +86,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
+	logger.Info("Shutdown signal received")
 	fmt.Println("\n🛑 Arrêt du serveur...")
 
 	// Arrêt gracieux du serveur
@@ -62,9 +94,10 @@ func main() {
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		log.Fatalf("❌ Erreur lors de l'arrêt du serveur: %v", err)
+		logger.Fatal("Failed to gracefully shutdown server", err)
 	}
 
+	logger.Info("Server shutdown completed")
 	fmt.Println("✅ Serveur arrêté proprement")
 }
 
@@ -73,10 +106,13 @@ func createMux() http.Handler {
 	mux := http.NewServeMux()
 
 	// Routes publiques (pas d'authentification requise)
-	mux.HandleFunc("/", handleHome)
-	mux.HandleFunc("/auth/register", handlers.HandleRegister)
-	mux.HandleFunc("/auth/login", handlers.HandleLogin)
-	mux.HandleFunc("/auth/logout", handlers.HandleLogout)
+	mux.HandleFunc("/", middleware.ErrorMiddleware(handleHome))
+	mux.HandleFunc("/auth/register", middleware.ErrorMiddleware(handlers.HandleRegister))
+	mux.HandleFunc("/auth/login", middleware.ErrorMiddleware(handlers.HandleLogin))
+	mux.HandleFunc("/auth/logout", middleware.ErrorMiddleware(handlers.HandleLogout))
+	
+	// Prometheus metrics endpoint
+	mux.Handle("/metrics", promhttp.Handler())
 
 	// Routes protégées (authentification requise)
 	mux.HandleFunc("/api/tasks", middleware.AuthMiddleware(handlers.HandleTasks))
@@ -86,15 +122,21 @@ func createMux() http.Handler {
 	return mux
 }
 
-func handleHome(w http.ResponseWriter, r *http.Request) {
+func handleHome(w http.ResponseWriter, r *http.Request) error {
 	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
+		return errors.NewNotFoundError("Page")
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]interface{}{
 		"message": "Bienvenue dans l'API REST Go avec authentification! 🎉",
+		"version": "2.0.0",
+		"features": []string{
+			"Advanced error handling",
+			"Structured logging",
+			"Input validation",
+			"Request tracking",
+		},
 		"endpoints": map[string]interface{}{
 			"auth": map[string]string{
 				"register": "POST /auth/register",
@@ -112,10 +154,13 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
 		"example": map[string]interface{}{
 			"login": map[string]interface{}{
 				"url":  "/auth/login",
-				"body": map[string]string{"username": "admin", "password": "password123"},
+				"body": map[string]string{"email": "user@example.com", "password": "YourPassword123"},
 			},
 			"usage": "Utilisez le token reçu avec 'Authorization: Bearer <token>'",
 		},
 	}
+	
+	logger.DebugContext(r.Context(), "Home endpoint accessed")
 	json.NewEncoder(w).Encode(response)
+	return nil
 } 

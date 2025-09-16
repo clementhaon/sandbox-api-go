@@ -1,0 +1,62 @@
+groups:
+  - name: sandbox-api-alerts
+    rules:
+      # High error rate
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status_code=~"5.."}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value }} per second for instance {{ $labels.instance }}"
+
+      # High response time
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 1
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High response time detected"
+          description: "95th percentile response time is {{ $value }}s for instance {{ $labels.instance }}"
+
+      # API down
+      - alert: APIDown
+        expr: up{job="sandbox-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API is down"
+          description: "API instance {{ $labels.instance }} is down"
+
+      # High database operation latency
+      - alert: HighDatabaseLatency
+        expr: histogram_quantile(0.95, rate(database_operation_duration_seconds_bucket[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High database latency detected"
+          description: "95th percentile database operation time is {{ $value }}s"
+
+      # High authentication failure rate
+      - alert: HighAuthFailureRate
+        expr: rate(auth_attempts_total{status!="success"}[5m]) > 0.5
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High authentication failure rate"
+          description: "Authentication failure rate is {{ $value }} per second"
+
+      # Database connection issues
+      - alert: DatabaseErrors
+        expr: rate(database_operations_total{status="error"}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Database errors detected"
+          description: "Database error rate is {{ $value }} per second"
