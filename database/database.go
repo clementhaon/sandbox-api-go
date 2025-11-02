@@ -41,6 +41,12 @@ func InitDB() error {
 	DB.SetMaxIdleConns(25)
 
 	log.Println("✅ Connexion à PostgreSQL établie avec succès")
+
+	// Exécuter les migrations automatiquement
+	if err := RunMigrations(DB); err != nil {
+		return fmt.Errorf("erreur lors de l'exécution des migrations: %v", err)
+	}
+
 	return nil
 }
 

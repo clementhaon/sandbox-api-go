@@ -52,6 +52,8 @@ func main() {
 				},
 				"authenticated": []string{
 					"GET /auth/user",
+					"GET /api/profile",
+					"PUT /api/profile",
 					"GET /api/tasks",
 					"POST /api/tasks",
 					"GET /api/tasks/{id}",
@@ -67,13 +69,16 @@ func main() {
 		fmt.Println("    POST /auth/register      - S'inscrire")
 		fmt.Println("    POST /auth/login         - Se connecter")
 		fmt.Println("    POST /auth/logout        - Se déconnecter")
+		fmt.Println("  Profil utilisateur (authentification requise):")
+		fmt.Println("    GET    /auth/user        - Obtenir les informations JWT de l'utilisateur")
+		fmt.Println("    GET    /api/profile      - Obtenir le profil complet")
+		fmt.Println("    PUT    /api/profile      - Modifier le profil (first_name, last_name, avatar_url)")
 		fmt.Println("  Tâches (authentification requise):")
-		fmt.Println("    GET    /auth/user        - Obtenir les informations de l'utilisateur")
-		fmt.Println("    GET    /api/tasks       - Lister vos tâches")
-		fmt.Println("    POST   /api/tasks       - Créer une tâche")
-		fmt.Println("    GET    /api/tasks/{id}  - Obtenir une tâche")
-		fmt.Println("    PUT    /api/tasks/{id}  - Mettre à jour une tâche")
-		fmt.Println("    DELETE /api/tasks/{id}  - Supprimer une tâche")
+		fmt.Println("    GET    /api/tasks        - Lister vos tâches")
+		fmt.Println("    POST   /api/tasks        - Créer une tâche")
+		fmt.Println("    GET    /api/tasks/{id}   - Obtenir une tâche")
+		fmt.Println("    PUT    /api/tasks/{id}   - Mettre à jour une tâche")
+		fmt.Println("    DELETE /api/tasks/{id}   - Supprimer une tâche")
 		fmt.Println("🗄️  Base de données PostgreSQL connectée")
 
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -118,8 +123,21 @@ func createMux() http.Handler {
 	mux.HandleFunc("/api/tasks", middleware.AuthMiddleware(handlers.HandleTasks))
 	mux.HandleFunc("/api/tasks/", middleware.AuthMiddleware(handlers.HandleTaskByID))
 	mux.HandleFunc("/auth/user", middleware.AuthMiddleware(handlers.HandleGetUser))
+	mux.HandleFunc("/api/profile", middleware.AuthMiddleware(handleProfile))
 
 	return mux
+}
+
+// handleProfile dispatche les requêtes de profil selon la méthode HTTP
+func handleProfile(w http.ResponseWriter, r *http.Request) error {
+	switch r.Method {
+	case http.MethodGet:
+		return handlers.HandleGetProfile(w, r)
+	case http.MethodPut:
+		return handlers.HandleUpdateProfile(w, r)
+	default:
+		return errors.NewMethodNotAllowedError()
+	}
 }
 
 func handleHome(w http.ResponseWriter, r *http.Request) error {
@@ -143,6 +161,10 @@ func handleHome(w http.ResponseWriter, r *http.Request) error {
 				"login":    "POST /auth/login",
 				"logout":   "POST /auth/logout",
 			},
+			"profile": map[string]string{
+				"get":    "GET /api/profile (with Authorization header)",
+				"update": "PUT /api/profile (with Authorization header)",
+			},
 			"tasks": map[string]string{
 				"list":   "GET /api/tasks (with Authorization header)",
 				"create": "POST /api/tasks (with Authorization header)",
@@ -159,7 +181,7 @@ func handleHome(w http.ResponseWriter, r *http.Request) error {
 			"usage": "Utilisez le token reçu avec 'Authorization: Bearer <token>'",
 		},
 	}
-	
+
 	logger.DebugContext(r.Context(), "Home endpoint accessed")
 	json.NewEncoder(w).Encode(response)
 	return nil

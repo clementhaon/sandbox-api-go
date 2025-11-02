@@ -9,29 +9,34 @@ clients:
   - url: http://loki:3100/loki/api/v1/push
 
 scrape_configs:
-  # API logs from Docker containers
+  # All Docker containers logs
   - job_name: containers
     docker_sd_configs:
       - host: unix:///var/run/docker.sock
         refresh_interval: 5s
-        filters:
-          - name: label
-            values: ["logging=promtail"]
+        # Remove filters to collect ALL containers
     relabel_configs:
+      # Extract service name from container name
       - source_labels: ['__meta_docker_container_name']
-        regex: '/sandbox-api-go-api-.*'
+        regex: '/sandbox-api-go-(.*)-.*'
         target_label: __service__
-        replacement: 'sandbox-api'
+        replacement: '${1}'
+      # Fallback for containers not matching the pattern
       - source_labels: ['__meta_docker_container_name']
-        regex: '/sandbox-api-go-postgres-.*'
+        regex: '/(.*)'
         target_label: __service__
-        replacement: 'postgres'
+        replacement: '${1}'
       - source_labels: ['__service__']
         target_label: job
       - source_labels: ['__meta_docker_container_name']
         target_label: container
       - source_labels: ['__meta_docker_container_log_stream']
         target_label: stream
+      # Add container labels as metadata
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: compose_service
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_project']
+        target_label: compose_project
 
   # System logs
   - job_name: system

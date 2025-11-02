@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 # Install git and ca-certificates (needed for go mod download)
 RUN apk add --no-cache git ca-certificates
@@ -36,8 +36,11 @@ WORKDIR /root/
 # Copy the binary from builder stage
 COPY --from=builder /app/main .
 
+# Copy migrations folder (needed for automatic migrations)
+COPY --from=builder /app/database/migrations ./database/migrations
+
 # Change ownership to non-root user
-RUN chown appuser:appgroup /root/main
+RUN chown -R appuser:appgroup /root/
 
 # Switch to non-root user
 USER appuser

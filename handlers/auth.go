@@ -61,9 +61,12 @@ func HandleRegister(w http.ResponseWriter, r *http.Request) error {
 	var newUser models.User
 	startTime = time.Now()
 	err = database.DB.QueryRow(
-		"INSERT INTO users (username, email, password) VALUES ($1, $2, $3) RETURNING id, username, email",
+		`INSERT INTO users (username, email, password, is_active, role)
+		VALUES ($1, $2, $3, true, 'user')
+		RETURNING id, username, email, first_name, last_name, avatar_url, is_active, last_login_at, role, created_at, updated_at`,
 		req.Username, req.Email, string(hashedPassword),
-	).Scan(&newUser.ID, &newUser.Username, &newUser.Email)
+	).Scan(&newUser.ID, &newUser.Username, &newUser.Email, &newUser.FirstName, &newUser.LastName,
+		&newUser.AvatarURL, &newUser.IsActive, &newUser.LastLoginAt, &newUser.Role, &newUser.CreatedAt, &newUser.UpdatedAt)
 	logger.LogDatabaseOperation(r.Context(), "INSERT", "users", time.Since(startTime), err)
 
 	if err != nil {
@@ -139,9 +142,12 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) error {
 	var hashedPassword string
 	startTime := time.Now()
 	err := database.DB.QueryRow(
-		"SELECT id, username, email, password FROM users WHERE Email = $1",
+		`SELECT id, username, email, password, first_name, last_name, avatar_url, is_active, last_login_at, role, created_at, updated_at
+		FROM users WHERE Email = $1`,
 		req.Email,
-	).Scan(&foundUser.ID, &foundUser.Username, &foundUser.Email, &hashedPassword)
+	).Scan(&foundUser.ID, &foundUser.Username, &foundUser.Email, &hashedPassword, &foundUser.FirstName,
+		&foundUser.LastName, &foundUser.AvatarURL, &foundUser.IsActive, &foundUser.LastLoginAt,
+		&foundUser.Role, &foundUser.CreatedAt, &foundUser.UpdatedAt)
 	logger.LogDatabaseOperation(r.Context(), "SELECT", "users", time.Since(startTime), err)
 
 	if err == sql.ErrNoRows {
@@ -161,6 +167,18 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) error {
 			"email":   req.Email,
 		})
 		return errors.NewInvalidCredentialsError()
+	}
+
+	// Mettre à jour last_login_at
+	startTime = time.Now()
+	_, err = database.DB.Exec("UPDATE users SET last_login_at = NOW() WHERE id = $1", foundUser.ID)
+	logger.LogDatabaseOperation(r.Context(), "UPDATE", "users", time.Since(startTime), err)
+	if err != nil {
+		logger.WarnContext(r.Context(), "Failed to update last_login_at", map[string]interface{}{
+			"user_id": foundUser.ID,
+			"error":   err.Error(),
+		})
+		// Non-blocking error, continue with login
 	}
 
 	// Générer le token

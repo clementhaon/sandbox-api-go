@@ -89,16 +89,35 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin123
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_INSTALL_PLUGINS=grafana-piechart-panel
+      - VIRTUAL_HOST=${VIRTUAL_HOST_MONITORING}
+      - LETSENCRYPT_HOST=${LETSENCRYPT_HOST_MONITORING}
+      - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}
     networks:
       - app-network
     restart: unless-stopped
     depends_on:
       - prometheus
 
+  # Init container to create Loki directories
+  loki-init:
+    image: alpine:latest
+    container_name: loki-init
+    volumes:
+      - loki_data:/tmp/loki
+    command: |
+      sh -c "
+        mkdir -p /tmp/loki/chunks /tmp/loki/wal /tmp/loki/boltdb-shipper-active /tmp/loki/boltdb-shipper-cache /tmp/loki/compactor /tmp/loki/rules /tmp/loki/rules-temp &&
+        chown -R 10001:10001 /tmp/loki &&
+        echo 'Loki directories created successfully'
+      "
+    networks:
+      - app-network
+
   # Loki - Log aggregation
   loki:
     image: grafana/loki:latest
     container_name: loki
+    user: "10001:10001"
     ports:
       - "3100:3100"
     volumes:
@@ -108,6 +127,10 @@ services:
     networks:
       - app-network
     restart: unless-stopped
+    environment:
+      - LOKI_TRACING_ENABLED=false
+    depends_on:
+      - loki-init
 
   # Promtail - Log shipping agent
   promtail:

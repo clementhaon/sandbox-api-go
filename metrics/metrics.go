@@ -111,7 +111,7 @@ func RecordDatabaseOperation(operation, table string, duration time.Duration, er
 	if err != nil {
 		status = "error"
 	}
-	
+
 	dbOperationsTotal.WithLabelValues(operation, table, status).Inc()
 	dbOperationDuration.WithLabelValues(operation, table).Observe(duration.Seconds())
 }
