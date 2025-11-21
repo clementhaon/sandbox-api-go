@@ -12,59 +12,59 @@ type ErrorCode string
 
 const (
 	// Authentication errors
-	ErrAuthRequired      ErrorCode = "AUTH_REQUIRED"
-	ErrInvalidToken      ErrorCode = "INVALID_TOKEN"
-	ErrTokenExpired      ErrorCode = "TOKEN_EXPIRED"
+	ErrAuthRequired       ErrorCode = "AUTH_REQUIRED"
+	ErrInvalidToken       ErrorCode = "INVALID_TOKEN"
+	ErrTokenExpired       ErrorCode = "TOKEN_EXPIRED"
 	ErrInvalidCredentials ErrorCode = "INVALID_CREDENTIALS"
-	ErrUserExists        ErrorCode = "USER_EXISTS"
+	ErrUserExists         ErrorCode = "USER_EXISTS"
 
 	// Validation errors
-	ErrValidationFailed  ErrorCode = "VALIDATION_FAILED"
-	ErrInvalidJSON       ErrorCode = "INVALID_JSON"
-	ErrMissingField      ErrorCode = "MISSING_FIELD"
-	ErrInvalidFormat     ErrorCode = "INVALID_FORMAT"
+	ErrValidationFailed ErrorCode = "VALIDATION_FAILED"
+	ErrInvalidJSON      ErrorCode = "INVALID_JSON"
+	ErrMissingField     ErrorCode = "MISSING_FIELD"
+	ErrInvalidFormat    ErrorCode = "INVALID_FORMAT"
 
 	// Resource errors
-	ErrNotFound          ErrorCode = "NOT_FOUND"
-	ErrForbidden         ErrorCode = "FORBIDDEN"
-	ErrConflict          ErrorCode = "CONFLICT"
+	ErrNotFound  ErrorCode = "NOT_FOUND"
+	ErrForbidden ErrorCode = "FORBIDDEN"
+	ErrConflict  ErrorCode = "CONFLICT"
 
 	// Server errors
-	ErrInternal          ErrorCode = "INTERNAL_ERROR"
-	ErrDatabase          ErrorCode = "DATABASE_ERROR"
+	ErrInternal           ErrorCode = "INTERNAL_ERROR"
+	ErrDatabase           ErrorCode = "DATABASE_ERROR"
 	ErrServiceUnavailable ErrorCode = "SERVICE_UNAVAILABLE"
 
 	// Method errors
-	ErrMethodNotAllowed  ErrorCode = "METHOD_NOT_ALLOWED"
+	ErrMethodNotAllowed ErrorCode = "METHOD_NOT_ALLOWED"
 )
 
 // ErrorType categorizes errors by their nature
 type ErrorType string
 
 const (
-	ErrorTypeClient    ErrorType = "client_error"     // 4xx errors
-	ErrorTypeServer    ErrorType = "server_error"     // 5xx errors
+	ErrorTypeClient     ErrorType = "client_error"     // 4xx errors
+	ErrorTypeServer     ErrorType = "server_error"     // 5xx errors
 	ErrorTypeValidation ErrorType = "validation_error" // Input validation errors
 )
 
 // ValidationError represents a field validation error
 type ValidationError struct {
-	Field   string `json:"field"`
-	Message string `json:"message"`
+	Field   string      `json:"field"`
+	Message string      `json:"message"`
 	Value   interface{} `json:"value,omitempty"`
 }
 
 // AppError represents a structured application error
 type AppError struct {
 	Code       ErrorCode         `json:"code"`
-	Message    string           `json:"message"`
-	Type       ErrorType        `json:"type"`
-	Details    interface{}      `json:"details,omitempty"`
+	Message    string            `json:"message"`
+	Type       ErrorType         `json:"type"`
+	Details    interface{}       `json:"details,omitempty"`
 	Validation []ValidationError `json:"validation,omitempty"`
-	StatusCode int              `json:"-"`
-	Timestamp  time.Time        `json:"timestamp"`
-	RequestID  string           `json:"request_id,omitempty"`
-	Cause      error            `json:"-"`
+	StatusCode int               `json:"-"`
+	Timestamp  time.Time         `json:"timestamp"`
+	RequestID  string            `json:"request_id,omitempty"`
+	Cause      error             `json:"-"`
 }
 
 // Error implements the error interface
@@ -109,6 +109,13 @@ func NewAuthRequiredError() *AppError {
 	return NewAppError(ErrAuthRequired, "Authentication required", http.StatusUnauthorized, ErrorTypeClient)
 }
 
+func NewUnauthorizedError(message string) *AppError {
+	if message == "" {
+		message = "Unauthorized access"
+	}
+	return NewAppError(ErrAuthRequired, message, http.StatusUnauthorized, ErrorTypeClient)
+}
+
 func NewInvalidTokenError() *AppError {
 	return NewAppError(ErrInvalidToken, "Invalid or malformed token", http.StatusUnauthorized, ErrorTypeClient)
 }
@@ -130,6 +137,13 @@ func NewValidationError(validationErrors []ValidationError) *AppError {
 	err := NewAppError(ErrValidationFailed, "Input validation failed", http.StatusBadRequest, ErrorTypeValidation)
 	err.Validation = validationErrors
 	return err
+}
+
+func NewBadRequestError(message string) *AppError {
+	if message == "" {
+		message = "Bad request"
+	}
+	return NewAppError(ErrValidationFailed, message, http.StatusBadRequest, ErrorTypeClient)
 }
 
 func NewInvalidJSONError() *AppError {
@@ -160,6 +174,13 @@ func NewConflictError(message string) *AppError {
 // Server Errors
 func NewInternalError() *AppError {
 	return NewAppError(ErrInternal, "Internal server error", http.StatusInternalServerError, ErrorTypeServer)
+}
+
+func NewInternalServerError(message string) *AppError {
+	if message == "" {
+		message = "Internal server error"
+	}
+	return NewAppError(ErrInternal, message, http.StatusInternalServerError, ErrorTypeServer)
 }
 
 func NewDatabaseError() *AppError {
@@ -195,7 +216,7 @@ func NewErrorResponse(err *AppError) *ErrorResponse {
 func WriteError(w http.ResponseWriter, err *AppError) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(err.StatusCode)
-	
+
 	response := NewErrorResponse(err)
 	json.NewEncoder(w).Encode(response)
 }

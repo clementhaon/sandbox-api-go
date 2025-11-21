@@ -6,15 +6,17 @@ Une API REST complète en Go avec authentification JWT et base de données Postg
 
 - 🔐 **Authentification JWT** : Inscription, connexion et protection des routes
 - 📋 **Gestion des tâches** : CRUD complet avec association utilisateur
+- 📁 **Gestion des médias** : Upload et accès sécurisés aux fichiers via MinIO avec URLs présignées
 - 🗄️ **Base de données PostgreSQL** : Persistance des données
-- 🐳 **Dockerisation complète** : API, base de données et pgAdmin
-- 🔒 **Sécurité** : Mots de passe hashés avec bcrypt
+- 🐳 **Dockerisation complète** : API, base de données, MinIO et pgAdmin
+- 🔒 **Sécurité** : Mots de passe hashés avec bcrypt et URLs présignées pour les fichiers
 - 🚀 **Performance** : Optimisé avec des index de base de données
 
 ## 🛠️ Technologies utilisées
 
 - **Backend** : Go 1.21
 - **Base de données** : PostgreSQL 15
+- **Stockage d'objets** : MinIO (S3-compatible)
 - **Authentification** : JWT (JSON Web Tokens)
 - **Hachage** : bcrypt
 - **Conteneurisation** : Docker & Docker Compose
@@ -40,8 +42,12 @@ docker-compose up --build
 ### 3. Accéder aux services
 - **API Go** : http://localhost:8080
 - **PostgreSQL** : localhost:5432
+- **MinIO** : http://localhost:9000
+  - Console MinIO : http://localhost:9001
+  - User : minioadmin
+  - Password : minioadmin123
 - **pgAdmin** : http://localhost:5050
-  - Email : admin@admin.com
+  - Email : admin@example.com
   - Mot de passe : admin123
 
 ## 📋 Endpoints disponibles
@@ -51,11 +57,23 @@ docker-compose up --build
 - `POST /auth/login` - Se connecter
 
 ### Tâches (authentification requise)
-- `GET /api/tasks` - Lister vos tâches
-- `POST /api/tasks` - Créer une tâche
-- `GET /api/tasks/{id}` - Obtenir une tâche
-- `PUT /api/tasks/{id}` - Mettre à jour une tâche
-- `DELETE /api/tasks/{id}` - Supprimer une tâche
+- `GET /tasks` - Lister vos tâches
+- `POST /tasks` - Créer une tâche
+- `GET /tasks/{id}` - Obtenir une tâche
+- `PUT /tasks/{id}` - Mettre à jour une tâche
+- `DELETE /tasks/{id}` - Supprimer une tâche
+
+### Profil utilisateur (authentification requise)
+- `GET /profile` - Obtenir le profil utilisateur
+- `PUT /profile` - Mettre à jour le profil utilisateur
+
+### Médias (authentification requise)
+- `POST /media/upload` - Obtenir une URL présignée pour uploader un fichier
+- `POST /media/confirm` - Confirmer l'upload et enregistrer le média
+- `GET /media` - Lister tous vos médias
+- `GET /media/{id}` - Obtenir un média par ID
+- `GET /media/{id}/download` - Obtenir une URL présignée pour télécharger un fichier
+- `DELETE /media/{id}` - Supprimer un média
 
 ## 🔐 Utilisation de l'API
 
@@ -82,7 +100,81 @@ curl -X POST http://localhost:8080/auth/login \
 
 ### 3. Utilisation du token
 ```bash
-curl -X GET http://localhost:8080/api/tasks \
+curl -X GET http://localhost:8080/tasks \
+  -H "Authorization: Bearer <votre_token_jwt>"
+```
+
+### 4. Upload d'un fichier
+
+#### Étape 1 : Obtenir une URL présignée pour l'upload
+```bash
+curl -X POST http://localhost:8080/media/upload \
+  -H "Authorization: Bearer <votre_token_jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "filename": "mon-image.jpg",
+    "mime_type": "image/jpeg"
+  }'
+```
+
+Réponse :
+```json
+{
+  "upload_url": "http://minio:9000/user-uploads/users/1/mon-image-abc123.jpg?...",
+  "object_key": "users/1/mon-image-abc123.jpg",
+  "expires_in": 3600
+}
+```
+
+#### Étape 2 : Uploader le fichier vers MinIO
+```bash
+curl -X PUT "<upload_url>" \
+  -H "Content-Type: image/jpeg" \
+  --data-binary @mon-image.jpg
+```
+
+#### Étape 3 : Confirmer l'upload et enregistrer dans la base de données
+```bash
+curl -X POST http://localhost:8080/media/confirm \
+  -H "Authorization: Bearer <votre_token_jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "object_key": "users/1/mon-image-abc123.jpg",
+    "original_filename": "mon-image.jpg",
+    "mime_type": "image/jpeg"
+  }'
+```
+
+### 5. Télécharger un fichier
+
+#### Obtenir une URL présignée pour télécharger
+```bash
+curl -X GET http://localhost:8080/media/1/download \
+  -H "Authorization: Bearer <votre_token_jwt>"
+```
+
+Réponse :
+```json
+{
+  "download_url": "http://minio:9000/user-uploads/users/1/mon-image-abc123.jpg?...",
+  "expires_in": 3600
+}
+```
+
+Ensuite, utilisez l'URL pour télécharger le fichier :
+```bash
+curl -o fichier-telecharge.jpg "<download_url>"
+```
+
+### 6. Lister vos médias
+```bash
+curl -X GET http://localhost:8080/media \
+  -H "Authorization: Bearer <votre_token_jwt>"
+```
+
+### 7. Supprimer un média
+```bash
+curl -X DELETE http://localhost:8080/media/1 \
   -H "Authorization: Bearer <votre_token_jwt>"
 ```
 
@@ -104,6 +196,17 @@ curl -X GET http://localhost:8080/api/tasks \
 - `description` : Description de la tâche
 - `completed` : Statut de complétion
 - `user_id` : Référence vers l'utilisateur
+- `created_at` : Date de création
+- `updated_at` : Date de mise à jour
+
+#### Table `media`
+- `id` : Identifiant unique (SERIAL)
+- `user_id` : Référence vers l'utilisateur
+- `object_key` : Clé de l'objet dans MinIO
+- `bucket_name` : Nom du bucket (par défaut: user-uploads)
+- `original_filename` : Nom original du fichier
+- `file_size` : Taille du fichier en octets
+- `mime_type` : Type MIME du fichier
 - `created_at` : Date de création
 - `updated_at` : Date de mise à jour
 
@@ -157,6 +260,8 @@ environment:
 ### Ports
 - **8080** : API Go
 - **5432** : PostgreSQL
+- **9000** : MinIO API
+- **9001** : MinIO Console
 - **5050** : pgAdmin
 
 ## 🚀 Déploiement en production
@@ -612,10 +717,16 @@ curl -X POST http://localhost:8080/auth/register \
 ```
 sandbox-api-go/
 ├── auth/           # Gestion des JWT
-├── database/       # Connexion PostgreSQL
+├── database/       # Connexion PostgreSQL et migrations
+│   └── migrations/ # Migrations de la base de données
 ├── handlers/       # Gestionnaires HTTP
-├── middleware/     # Middleware d'authentification
+├── middleware/     # Middleware d'authentification et erreurs
 ├── models/         # Modèles de données
+├── storage/        # Service MinIO pour la gestion des fichiers
+├── logger/         # Système de logs
+├── errors/         # Gestion des erreurs
+├── metrics/        # Métriques Prometheus
+├── monitoring/     # Configuration de l'observabilité
 ├── Dockerfile      # Configuration Docker
 ├── docker-compose.yml  # Orchestration des services
 ├── init.sql        # Initialisation de la base de données

@@ -31,14 +31,14 @@ func ErrorMiddleware(handler ErrorHandler) http.HandlerFunc {
 		// Execute the handler
 		err := handler(w, r)
 		
-		// Log the request
+		// Calculate duration for metrics
 		duration := time.Since(startTime)
 		
 		if err != nil {
 			handleError(w, r, err, requestID)
 		}
 
-		// Record metrics and log requests
+		// Record Prometheus metrics
 		statusCode := 200
 		if err != nil {
 			if appErr, ok := errors.IsAppError(err); ok {
@@ -46,11 +46,8 @@ func ErrorMiddleware(handler ErrorHandler) http.HandlerFunc {
 			} else {
 				statusCode = 500
 			}
-		} else {
-			logger.LogHTTPRequest(ctx, r.Method, r.URL.Path, statusCode, duration)
 		}
 		
-		// Record Prometheus metrics
 		endpoint := normalizeEndpoint(r.URL.Path)
 		metrics.RecordHTTPRequest(r.Method, endpoint, statusCode, duration)
 	}
@@ -160,12 +157,14 @@ func RequestLoggingMiddleware(next http.Handler) http.Handler {
 		// Set request ID header
 		wrapper.Header().Set("X-Request-ID", requestID)
 
-		// Execute next handler
-		next.ServeHTTP(wrapper, r)
+	// Execute next handler
+	next.ServeHTTP(wrapper, r)
 
-		// Log the completed request
+	// Log the completed request (skip metrics endpoint to reduce noise)
+	if r.URL.Path != "/metrics" {
 		duration := time.Since(startTime)
 		logger.LogHTTPRequest(r.Context(), r.Method, r.URL.Path, wrapper.statusCode, duration)
+	}
 	})
 }
 

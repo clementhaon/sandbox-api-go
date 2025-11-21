@@ -266,7 +266,9 @@ func HandleGetUser(w http.ResponseWriter, r *http.Request) error {
 			"issue": "user_context_missing",
 		})
 	}
-
+	logger.Info("HandleGetUser", map[string]interface{}{
+		"claims": claims,
+	})
 	json.NewEncoder(w).Encode(claims)
 	return nil
 }

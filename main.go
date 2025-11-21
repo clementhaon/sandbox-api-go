@@ -9,14 +9,15 @@ import (
 	"os/signal"
 	"runtime"
 	"sandbox-api-go/database"
-	"sandbox-api-go/handlers"
-	"sandbox-api-go/middleware"
-	"sandbox-api-go/logger"
 	"sandbox-api-go/errors"
+	"sandbox-api-go/handlers"
+	"sandbox-api-go/logger"
 	"sandbox-api-go/metrics"
+	"sandbox-api-go/middleware"
+	"sandbox-api-go/storage"
 	"syscall"
 	"time"
-	
+
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -24,7 +25,7 @@ func main() {
 	// Initialize logger first
 	logger.Initialize()
 	logger.Info("Starting sandbox-api-go application")
-	
+
 	// Initialize metrics
 	metrics.InitAppInfo("2.0.0", "dev", time.Now().Format("2006-01-02"), runtime.Version())
 
@@ -34,6 +35,11 @@ func main() {
 	}
 	defer database.CloseDB()
 
+	// Initialisation de MinIO
+	if err := storage.InitMinIO(); err != nil {
+		logger.Fatal("Failed to initialize MinIO", err)
+	}
+
 	// Création du serveur HTTP avec middleware de gestion d'erreurs
 	server := &http.Server{
 		Addr:    ":8080",
@@ -42,45 +48,6 @@ func main() {
 
 	// Démarrage du serveur dans une goroutine
 	go func() {
-		logger.Info("Server starting", map[string]interface{}{
-			"port": "8080",
-			"endpoints": map[string]interface{}{
-				"public": []string{
-					"POST /auth/register",
-					"POST /auth/login",
-					"POST /auth/logout",
-				},
-				"authenticated": []string{
-					"GET /auth/user",
-					"GET /api/profile",
-					"PUT /api/profile",
-					"GET /api/tasks",
-					"POST /api/tasks",
-					"GET /api/tasks/{id}",
-					"PUT /api/tasks/{id}",
-					"DELETE /api/tasks/{id}",
-				},
-			},
-		})
-		
-		fmt.Println("🚀 Serveur API REST avec authentification démarré sur http://localhost:8080")
-		fmt.Println("📋 Endpoints disponibles:")
-		fmt.Println("  Authentification (publique):")
-		fmt.Println("    POST /auth/register      - S'inscrire")
-		fmt.Println("    POST /auth/login         - Se connecter")
-		fmt.Println("    POST /auth/logout        - Se déconnecter")
-		fmt.Println("  Profil utilisateur (authentification requise):")
-		fmt.Println("    GET    /auth/user        - Obtenir les informations JWT de l'utilisateur")
-		fmt.Println("    GET    /api/profile      - Obtenir le profil complet")
-		fmt.Println("    PUT    /api/profile      - Modifier le profil (first_name, last_name, avatar_url)")
-		fmt.Println("  Tâches (authentification requise):")
-		fmt.Println("    GET    /api/tasks        - Lister vos tâches")
-		fmt.Println("    POST   /api/tasks        - Créer une tâche")
-		fmt.Println("    GET    /api/tasks/{id}   - Obtenir une tâche")
-		fmt.Println("    PUT    /api/tasks/{id}   - Mettre à jour une tâche")
-		fmt.Println("    DELETE /api/tasks/{id}   - Supprimer une tâche")
-		fmt.Println("🗄️  Base de données PostgreSQL connectée")
-
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Fatal("Failed to start server", err)
 		}
@@ -115,15 +82,21 @@ func createMux() http.Handler {
 	mux.HandleFunc("/auth/register", middleware.ErrorMiddleware(handlers.HandleRegister))
 	mux.HandleFunc("/auth/login", middleware.ErrorMiddleware(handlers.HandleLogin))
 	mux.HandleFunc("/auth/logout", middleware.ErrorMiddleware(handlers.HandleLogout))
-	
+
 	// Prometheus metrics endpoint
 	mux.Handle("/metrics", promhttp.Handler())
 
 	// Routes protégées (authentification requise)
-	mux.HandleFunc("/api/tasks", middleware.AuthMiddleware(handlers.HandleTasks))
-	mux.HandleFunc("/api/tasks/", middleware.AuthMiddleware(handlers.HandleTaskByID))
+	mux.HandleFunc("/tasks", middleware.AuthMiddleware(handlers.HandleTasks))
+	mux.HandleFunc("/tasks/", middleware.AuthMiddleware(handlers.HandleTaskByID))
 	mux.HandleFunc("/auth/user", middleware.AuthMiddleware(handlers.HandleGetUser))
-	mux.HandleFunc("/api/profile", middleware.AuthMiddleware(handleProfile))
+	mux.HandleFunc("/profile", middleware.AuthMiddleware(handleProfile))
+
+	// Routes pour la gestion des médias (authentification requise)
+	mux.HandleFunc("/media/upload", middleware.AuthMiddleware(handlers.HandleGetPresignedUploadURL))
+	mux.HandleFunc("/media/confirm", middleware.AuthMiddleware(handlers.HandleConfirmUpload))
+	mux.HandleFunc("/media", middleware.AuthMiddleware(handlers.HandleGetUserMedia))
+	mux.HandleFunc("/media/", middleware.AuthMiddleware(handleMediaRoutes))
 
 	return mux
 }
@@ -140,6 +113,26 @@ func handleProfile(w http.ResponseWriter, r *http.Request) error {
 	}
 }
 
+// handleMediaRoutes dispatche les requêtes média selon le path et la méthode HTTP
+func handleMediaRoutes(w http.ResponseWriter, r *http.Request) error {
+	path := r.URL.Path
+
+	// /media/{id}/download - Obtenir une URL de téléchargement présignée
+	if len(path) > 7 && path[len(path)-9:] == "/download" {
+		return handlers.HandleGetPresignedDownloadURL(w, r)
+	}
+
+	// /media/{id} - Obtenir un média par ID ou le supprimer
+	switch r.Method {
+	case http.MethodGet:
+		return handlers.HandleGetMediaByID(w, r)
+	case http.MethodDelete:
+		return handlers.HandleDeleteMedia(w, r)
+	default:
+		return errors.NewMethodNotAllowedError()
+	}
+}
+
 func handleHome(w http.ResponseWriter, r *http.Request) error {
 	if r.URL.Path != "/" {
 		return errors.NewNotFoundError("Page")
@@ -149,40 +142,9 @@ func handleHome(w http.ResponseWriter, r *http.Request) error {
 	response := map[string]interface{}{
 		"message": "Bienvenue dans l'API REST Go avec authentification! 🎉",
 		"version": "2.0.0",
-		"features": []string{
-			"Advanced error handling",
-			"Structured logging",
-			"Input validation",
-			"Request tracking",
-		},
-		"endpoints": map[string]interface{}{
-			"auth": map[string]string{
-				"register": "POST /auth/register",
-				"login":    "POST /auth/login",
-				"logout":   "POST /auth/logout",
-			},
-			"profile": map[string]string{
-				"get":    "GET /api/profile (with Authorization header)",
-				"update": "PUT /api/profile (with Authorization header)",
-			},
-			"tasks": map[string]string{
-				"list":   "GET /api/tasks (with Authorization header)",
-				"create": "POST /api/tasks (with Authorization header)",
-				"get":    "GET /api/tasks/{id} (with Authorization header)",
-				"update": "PUT /api/tasks/{id} (with Authorization header)",
-				"delete": "DELETE /api/tasks/{id} (with Authorization header)",
-			},
-		},
-		"example": map[string]interface{}{
-			"login": map[string]interface{}{
-				"url":  "/auth/login",
-				"body": map[string]string{"email": "user@example.com", "password": "YourPassword123"},
-			},
-			"usage": "Utilisez le token reçu avec 'Authorization: Bearer <token>'",
-		},
 	}
 
 	logger.DebugContext(r.Context(), "Home endpoint accessed")
 	json.NewEncoder(w).Encode(response)
 	return nil
-} 
+}

@@ -2,9 +2,10 @@ package auth
 
 import (
 	"fmt"
+	"os"
 	"sandbox-api-go/models"
 	"time"
-	"os"
+
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -16,7 +17,19 @@ func GenerateToken(user models.User) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id":  user.ID,
 		"username": user.Username,
+		"role":     user.Role,
 		"exp":      time.Now().Add(time.Hour * 24).Unix(), // Expire dans 24h
+	}
+
+	// Ajouter les champs optionnels s'ils sont présents
+	if user.FirstName.Valid {
+		claims["first_name"] = user.FirstName.String
+	}
+	if user.LastName.Valid {
+		claims["last_name"] = user.LastName.String
+	}
+	if user.AvatarURL.Valid {
+		claims["avatar_url"] = user.AvatarURL.String
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -41,12 +54,28 @@ func ValidateToken(tokenString string) (*models.Claims, error) {
 		username := claims["username"].(string)
 		exp := int64(claims["exp"].(float64))
 
-		return &models.Claims{
+		result := &models.Claims{
 			UserID:    userID,
 			Username:  username,
 			ExpiresAt: time.Unix(exp, 0),
-		}, nil
+		}
+
+		// Extraire les champs optionnels s'ils existent
+		if role, ok := claims["role"].(string); ok {
+			result.Role = role
+		}
+		if firstName, ok := claims["first_name"].(string); ok {
+			result.FirstName = firstName
+		}
+		if lastName, ok := claims["last_name"].(string); ok {
+			result.LastName = lastName
+		}
+		if avatarURL, ok := claims["avatar_url"].(string); ok {
+			result.AvatarURL = avatarURL
+		}
+
+		return result, nil
 	}
 
 	return nil, fmt.Errorf("token invalide")
-} 
+}

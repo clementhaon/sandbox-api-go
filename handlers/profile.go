@@ -22,6 +22,10 @@ func HandleGetProfile(w http.ResponseWriter, r *http.Request) error {
 
 	// Récupérer l'utilisateur depuis le contexte
 	claims, ok := r.Context().Value(middleware.UserContextKey).(*models.Claims)
+
+	logger.Info("HandleGetProfile", map[string]interface{}{
+		"claims": claims,
+	})
 	if !ok {
 		logger.ErrorContext(r.Context(), "Missing user context in authenticated request", nil)
 		return errors.NewInternalError().WithDetails(map[string]interface{}{

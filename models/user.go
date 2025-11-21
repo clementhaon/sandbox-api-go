@@ -23,7 +23,7 @@ type User struct {
 
 // LoginRequest represents login credentials
 type LoginRequest struct {
-	Email string `json:"email"`
+	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
@@ -51,7 +51,11 @@ type AuthResponse struct {
 
 // Claims represents JWT claims
 type Claims struct {
-	UserID   int    `json:"user_id"`
-	Username string `json:"username"`
+	UserID    int       `json:"user_id"`
+	Username  string    `json:"username"`
+	Role      string    `json:"role,omitempty"`
+	FirstName string    `json:"first_name,omitempty"`
+	LastName  string    `json:"last_name,omitempty"`
+	AvatarURL string    `json:"avatar_url,omitempty"`
 	ExpiresAt time.Time `json:"exp"`
-} 
+}
