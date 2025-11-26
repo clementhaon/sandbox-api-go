@@ -23,10 +23,10 @@ func InitMinIO() error {
 	secretAccessKey := config.GetEnv("MINIO_ROOT_PASSWORD", "minioadmin123")
 	useSSL := config.GetEnv("MINIO_USE_SSL", "false") == "true"
 	logger.Info("Initializing MinIO client", map[string]interface{}{
-		"endpoint": endpoint,
-		"accessKeyID": accessKeyID,
+		"endpoint":        endpoint,
+		"accessKeyID":     accessKeyID,
 		"secretAccessKey": secretAccessKey,
-		"useSSL": useSSL,
+		"useSSL":          useSSL,
 	})
 	var err error
 	MinioClient, err = minio.New(endpoint, &minio.Options{
@@ -87,7 +87,7 @@ func GeneratePresignedUploadURL(filename, mimeType string, userID int) (string, 
 	reqParams := make(url.Values)
 	reqParams.Set("response-content-type", mimeType)
 
-	presignedURL, err := MinioClient.PresignedPutObject(ctx, bucketName, objectKey, 1*time.Hour)
+	presignedURL, err := MinioClient.PresignedPutObject(ctx, bucketName, objectKey, 7*24*time.Hour)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to generate presigned upload URL: %v", err)
 	}
@@ -102,7 +102,7 @@ func GeneratePresignedDownloadURL(objectKey string) (string, error) {
 	reqParams := make(url.Values)
 	reqParams.Set("response-content-disposition", fmt.Sprintf("attachment; filename=\"%s\"", filepath.Base(objectKey)))
 
-	presignedURL, err := MinioClient.PresignedGetObject(ctx, bucketName, objectKey, 1*time.Hour, reqParams)
+	presignedURL, err := MinioClient.PresignedGetObject(ctx, bucketName, objectKey, 7*24*time.Hour, reqParams)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate presigned download URL: %v", err)
 	}
@@ -134,3 +134,4 @@ func GetObjectInfo(objectKey string) (*minio.ObjectInfo, error) {
 
 	return &objInfo, nil
 }
+
