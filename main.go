@@ -15,6 +15,7 @@ import (
 	"sandbox-api-go/metrics"
 	"sandbox-api-go/middleware"
 	"sandbox-api-go/storage"
+	"sandbox-api-go/websocket"
 	"syscall"
 	"time"
 
@@ -39,6 +40,10 @@ func main() {
 	if err := storage.InitMinIO(); err != nil {
 		logger.Fatal("Failed to initialize MinIO", err)
 	}
+
+	// Initialize WebSocket manager
+	websocket.Init()
+	logger.Info("WebSocket manager initialized")
 
 	// Création du serveur HTTP avec middleware de gestion d'erreurs
 	server := &http.Server{
@@ -86,13 +91,64 @@ func createMux() http.Handler {
 	// Prometheus metrics endpoint
 	mux.Handle("/metrics", promhttp.Handler())
 
-	// Routes protégées (authentification requise)
-	mux.HandleFunc("/tasks", middleware.AuthMiddleware(handlers.HandleTasks))
-	mux.HandleFunc("/tasks/", middleware.AuthMiddleware(handlers.HandleTaskByID))
+	// WebSocket endpoint (auth via query param)
+	mux.HandleFunc("/ws", handlers.HandleWebSocket)
+
+	// ============================================
+	// Users Management Routes
+	// ============================================
+	mux.HandleFunc("GET /users", middleware.AuthMiddleware(handlers.ListUsers))
+	mux.HandleFunc("GET /users/{id}", middleware.AuthMiddleware(handlers.GetUser))
+	mux.HandleFunc("POST /users", middleware.AuthMiddleware(handlers.CreateUser))
+	mux.HandleFunc("PUT /users/{id}", middleware.AuthMiddleware(handlers.UpdateUser))
+	mux.HandleFunc("PATCH /users/{id}/status", middleware.AuthMiddleware(handlers.UpdateUserStatus))
+	mux.HandleFunc("DELETE /users/{id}", middleware.AuthMiddleware(handlers.DeleteUser))
+
+	// ============================================
+	// Columns Management Routes
+	// ============================================
+	mux.HandleFunc("GET /columns", middleware.AuthMiddleware(handlers.ListColumns))
+	mux.HandleFunc("POST /columns", middleware.AuthMiddleware(handlers.CreateColumn))
+	mux.HandleFunc("PUT /columns/{id}", middleware.AuthMiddleware(handlers.UpdateColumn))
+	mux.HandleFunc("DELETE /columns/{id}", middleware.AuthMiddleware(handlers.DeleteColumn))
+	mux.HandleFunc("PATCH /columns/reorder", middleware.AuthMiddleware(handlers.ReorderColumns))
+
+	// ============================================
+	// Tasks Management Routes (Board)
+	// ============================================
+	mux.HandleFunc("GET /tasks/board", middleware.AuthMiddleware(handlers.GetBoard))
+	mux.HandleFunc("GET /tasks", middleware.AuthMiddleware(handlers.ListTasks))
+	mux.HandleFunc("GET /tasks/{id}", middleware.AuthMiddleware(handlers.GetTask))
+	mux.HandleFunc("POST /tasks", middleware.AuthMiddleware(handlers.CreateTask))
+	mux.HandleFunc("PUT /tasks/{id}", middleware.AuthMiddleware(handlers.UpdateTask))
+	mux.HandleFunc("PATCH /tasks/{id}/move", middleware.AuthMiddleware(handlers.MoveTask))
+	mux.HandleFunc("PATCH /tasks/reorder", middleware.AuthMiddleware(handlers.ReorderTasks))
+	mux.HandleFunc("DELETE /tasks/{id}", middleware.AuthMiddleware(handlers.DeleteTask))
+
+	// ============================================
+	// Time Entries Routes
+	// ============================================
+	mux.HandleFunc("GET /time-entries", middleware.AuthMiddleware(handlers.ListTimeEntries))
+	mux.HandleFunc("POST /time-entries", middleware.AuthMiddleware(handlers.CreateTimeEntry))
+	mux.HandleFunc("DELETE /time-entries/{id}", middleware.AuthMiddleware(handlers.DeleteTimeEntry))
+
+	// ============================================
+	// Notifications Routes
+	// ============================================
+	mux.HandleFunc("GET /notifications", middleware.AuthMiddleware(handlers.ListNotifications))
+	mux.HandleFunc("PATCH /notifications/read", middleware.AuthMiddleware(handlers.MarkNotificationsRead))
+	mux.HandleFunc("PATCH /notifications/read-all", middleware.AuthMiddleware(handlers.MarkAllNotificationsRead))
+	mux.HandleFunc("DELETE /notifications/{id}", middleware.AuthMiddleware(handlers.DeleteNotification))
+
+	// ============================================
+	// Auth & Profile Routes
+	// ============================================
 	mux.HandleFunc("/auth/user", middleware.AuthMiddleware(handlers.HandleGetUser))
 	mux.HandleFunc("/profile", middleware.AuthMiddleware(handleProfile))
 
-	// Routes pour la gestion des médias (authentification requise)
+	// ============================================
+	// Media Routes
+	// ============================================
 	mux.HandleFunc("/media/upload", middleware.AuthMiddleware(handlers.HandleGetPresignedUploadURL))
 	mux.HandleFunc("/media/confirm", middleware.AuthMiddleware(handlers.HandleConfirmUpload))
 	mux.HandleFunc("/media", middleware.AuthMiddleware(handlers.HandleGetUserMedia))

@@ -4,300 +4,572 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"time"
+
 	"sandbox-api-go/database"
-	"sandbox-api-go/middleware"
-	"sandbox-api-go/models"
 	"sandbox-api-go/errors"
 	"sandbox-api-go/logger"
-	"sandbox-api-go/metrics"
-	"sandbox-api-go/validation"
-	"strconv"
-	"strings"
-	"time"
+	"sandbox-api-go/middleware"
+	"sandbox-api-go/models"
+
+	"github.com/lib/pq"
 )
 
-// HandleTasks gère les requêtes GET et POST sur /api/tasks
-func HandleTasks(w http.ResponseWriter, r *http.Request) error {
+// GetBoard handles GET /tasks/board - returns all columns and tasks for the board
+func GetBoard(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set("Content-Type", "application/json")
 
-	switch r.Method {
-	case http.MethodGet:
-		return getAllUserTasks(w, r)
-	case http.MethodPost:
-		return createTask(w, r)
-	default:
-		return errors.NewMethodNotAllowedError()
-	}
-}
-
-// HandleTaskByID gère les requêtes sur /api/tasks/{id}
-func HandleTaskByID(w http.ResponseWriter, r *http.Request) error {
-	w.Header().Set("Content-Type", "application/json")
-
-	// Extraire l'ID depuis l'URL
-	path := strings.TrimPrefix(r.URL.Path, "/api/tasks/")
-	if path == "" {
-		return errors.NewMissingFieldError("task_id")
-	}
-
-	id, err := strconv.Atoi(path)
-	if err != nil {
-		logger.WarnContext(r.Context(), "Invalid task ID format", map[string]interface{}{
-			"provided_id": path,
-			"error":       err.Error(),
-		})
-		return errors.NewInvalidFormatError("task_id", "integer")
-	}
-
-	switch r.Method {
-	case http.MethodGet:
-		return getTaskByID(w, r, id)
-	case http.MethodPut:
-		return updateTask(w, r, id)
-	case http.MethodDelete:
-		return deleteTask(w, r, id)
-	default:
-		return errors.NewMethodNotAllowedError()
-	}
-}
-
-// getAllUserTasks retourne toutes les tâches de l'utilisateur connecté
-func getAllUserTasks(w http.ResponseWriter, r *http.Request) error {
-	// Récupérer l'utilisateur depuis le contexte (ajouté par le middleware)
-	claims, ok := r.Context().Value(middleware.UserContextKey).(*models.Claims)
-	if !ok {
-		logger.ErrorContext(r.Context(), "Missing user context in authenticated request", nil)
-		return errors.NewInternalError().WithDetails(map[string]interface{}{
-			"issue": "user_context_missing",
-		})
-	}
-
-	// Récupérer les tâches depuis la base de données
+	// Get columns
 	startTime := time.Now()
-	rows, err := database.DB.Query("SELECT id, title, description, completed, user_id FROM tasks WHERE user_id = $1 ORDER BY created_at DESC", claims.UserID)
-	logger.LogDatabaseOperation(r.Context(), "SELECT", "tasks", time.Since(startTime), err)
-	metrics.RecordDatabaseOperation("SELECT", "tasks", time.Since(startTime), err)
-	
+	colRows, err := database.DB.Query(`SELECT id, title, "order", color, created_at, updated_at FROM columns ORDER BY "order" ASC`)
+	logger.LogDatabaseOperation(r.Context(), "SELECT", "columns", time.Since(startTime), err)
+
 	if err != nil {
-		logger.ErrorContext(r.Context(), "Error fetching user tasks", err, map[string]interface{}{
-			"user_id": claims.UserID,
-		})
+		logger.ErrorContext(r.Context(), "Error querying columns", err)
+		return errors.NewDatabaseError().WithCause(err)
+	}
+	defer colRows.Close()
+
+	columns := []models.Column{}
+	for colRows.Next() {
+		var c models.Column
+		if err := colRows.Scan(&c.ID, &c.Title, &c.Order, &c.Color, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			logger.ErrorContext(r.Context(), "Error scanning column row", err)
+			return errors.NewDatabaseError().WithCause(err)
+		}
+		columns = append(columns, c)
+	}
+
+	// Get tasks with assignee info
+	startTime = time.Now()
+	taskRows, err := database.DB.Query(`
+		SELECT t.id, t.title, t.description, t.column_id, t."order", t.priority,
+			t.assignee_id, t.deadline, t.estimated_time, t.tracked_time, t.tags,
+			t.created_by, t.user_id, t.created_at, t.updated_at,
+			u.id, u.username, u.avatar_url
+		FROM tasks t
+		LEFT JOIN users u ON t.assignee_id = u.id
+		ORDER BY t.column_id, t."order" ASC
+	`)
+	logger.LogDatabaseOperation(r.Context(), "SELECT", "tasks", time.Since(startTime), err)
+
+	if err != nil {
+		logger.ErrorContext(r.Context(), "Error querying tasks", err)
+		return errors.NewDatabaseError().WithCause(err)
+	}
+	defer taskRows.Close()
+
+	tasks := []models.Task{}
+	for taskRows.Next() {
+		var t models.TaskDB
+		var assigneeID, assigneeUsername sql.NullInt64
+		var assigneeUsernameStr, assigneeAvatarURL sql.NullString
+
+		err := taskRows.Scan(
+			&t.ID, &t.Title, &t.Description, &t.ColumnID, &t.Order, &t.Priority,
+			&t.AssigneeID, &t.Deadline, &t.EstimatedTime, &t.TrackedTime, &t.Tags,
+			&t.CreatedBy, &t.UserID, &t.CreatedAt, &t.UpdatedAt,
+			&assigneeID, &assigneeUsernameStr, &assigneeAvatarURL,
+		)
+		if err != nil {
+			logger.ErrorContext(r.Context(), "Error scanning task row", err)
+			return errors.NewDatabaseError().WithCause(err)
+		}
+
+		task := t.ToTask()
+		if assigneeID.Valid {
+			task.Assignee = &models.UserBrief{
+				ID:       int(assigneeID.Int64),
+				Username: assigneeUsernameStr.String,
+			}
+			if assigneeAvatarURL.Valid {
+				task.Assignee.AvatarURL = assigneeAvatarURL.String
+			}
+		}
+		_ = assigneeUsername // suppress unused warning
+		tasks = append(tasks, task)
+	}
+
+	response := models.BoardResponse{
+		Columns: columns,
+		Tasks:   tasks,
+	}
+
+	json.NewEncoder(w).Encode(response)
+	return nil
+}
+
+// ListTasks handles GET /tasks - list tasks optionally filtered by column
+func ListTasks(w http.ResponseWriter, r *http.Request) error {
+	w.Header().Set("Content-Type", "application/json")
+
+	columnIDStr := r.URL.Query().Get("columnId")
+
+	var query string
+	var args []interface{}
+
+	if columnIDStr != "" {
+		columnID, err := strconv.Atoi(columnIDStr)
+		if err != nil {
+			return errors.NewBadRequestError("Invalid columnId")
+		}
+		query = `
+			SELECT t.id, t.title, t.description, t.column_id, t."order", t.priority,
+				t.assignee_id, t.deadline, t.estimated_time, t.tracked_time, t.tags,
+				t.created_by, t.user_id, t.created_at, t.updated_at,
+				u.id, u.username, u.avatar_url
+			FROM tasks t
+			LEFT JOIN users u ON t.assignee_id = u.id
+			WHERE t.column_id = $1
+			ORDER BY t."order" ASC
+		`
+		args = append(args, columnID)
+	} else {
+		query = `
+			SELECT t.id, t.title, t.description, t.column_id, t."order", t.priority,
+				t.assignee_id, t.deadline, t.estimated_time, t.tracked_time, t.tags,
+				t.created_by, t.user_id, t.created_at, t.updated_at,
+				u.id, u.username, u.avatar_url
+			FROM tasks t
+			LEFT JOIN users u ON t.assignee_id = u.id
+			ORDER BY t.column_id, t."order" ASC
+		`
+	}
+
+	startTime := time.Now()
+	rows, err := database.DB.Query(query, args...)
+	logger.LogDatabaseOperation(r.Context(), "SELECT", "tasks", time.Since(startTime), err)
+
+	if err != nil {
+		logger.ErrorContext(r.Context(), "Error querying tasks", err)
 		return errors.NewDatabaseError().WithCause(err)
 	}
 	defer rows.Close()
 
-	var userTasks []models.Task
+	tasks := []models.Task{}
 	for rows.Next() {
-		var task models.Task
-		if err := rows.Scan(&task.ID, &task.Title, &task.Description, &task.Completed, &task.UserID); err != nil {
+		var t models.TaskDB
+		var assigneeID sql.NullInt64
+		var assigneeUsername, assigneeAvatarURL sql.NullString
+
+		err := rows.Scan(
+			&t.ID, &t.Title, &t.Description, &t.ColumnID, &t.Order, &t.Priority,
+			&t.AssigneeID, &t.Deadline, &t.EstimatedTime, &t.TrackedTime, &t.Tags,
+			&t.CreatedBy, &t.UserID, &t.CreatedAt, &t.UpdatedAt,
+			&assigneeID, &assigneeUsername, &assigneeAvatarURL,
+		)
+		if err != nil {
 			logger.ErrorContext(r.Context(), "Error scanning task row", err)
 			return errors.NewDatabaseError().WithCause(err)
 		}
-		userTasks = append(userTasks, task)
+
+		task := t.ToTask()
+		if assigneeID.Valid {
+			task.Assignee = &models.UserBrief{
+				ID:       int(assigneeID.Int64),
+				Username: assigneeUsername.String,
+			}
+			if assigneeAvatarURL.Valid {
+				task.Assignee.AvatarURL = assigneeAvatarURL.String
+			}
+		}
+		tasks = append(tasks, task)
 	}
 
-	logger.DebugContext(r.Context(), "Retrieved user tasks", map[string]interface{}{
-		"user_id":    claims.UserID,
-		"task_count": len(userTasks),
-	})
-
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"tasks":    userTasks,
-		"count":    len(userTasks),
-		"username": claims.Username,
-	})
+	json.NewEncoder(w).Encode(tasks)
 	return nil
 }
 
-// createTask crée une nouvelle tâche pour l'utilisateur connecté
-func createTask(w http.ResponseWriter, r *http.Request) error {
-	// Récupérer l'utilisateur depuis le contexte
-	claims, ok := r.Context().Value(middleware.UserContextKey).(*models.Claims)
-	if !ok {
-		logger.ErrorContext(r.Context(), "Missing user context in authenticated request", nil)
-		return errors.NewInternalError().WithDetails(map[string]interface{}{
-			"issue": "user_context_missing",
-		})
-	}
+// GetTask handles GET /tasks/{id}
+func GetTask(w http.ResponseWriter, r *http.Request) error {
+	w.Header().Set("Content-Type", "application/json")
 
-	var newTask models.Task
-	if err := json.NewDecoder(r.Body).Decode(&newTask); err != nil {
-		logger.WarnContext(r.Context(), "Invalid JSON in create task request", map[string]interface{}{
-			"error": err.Error(),
-		})
-		return errors.NewInvalidJSONError()
-	}
-
-	// Validation
-	if validationErr := validation.ValidateTaskInput(newTask.Title, newTask.Description); validationErr != nil {
-		return validationErr
-	}
-
-	// Créer la tâche dans la base de données
-	var createdTask models.Task
-	startTime := time.Now()
-	err := database.DB.QueryRow(
-		"INSERT INTO tasks (title, description, completed, user_id) VALUES ($1, $2, $3, $4) RETURNING id, title, description, completed, user_id",
-		newTask.Title, newTask.Description, newTask.Completed, claims.UserID,
-	).Scan(&createdTask.ID, &createdTask.Title, &createdTask.Description, &createdTask.Completed, &createdTask.UserID)
-	logger.LogDatabaseOperation(r.Context(), "INSERT", "tasks", time.Since(startTime), err)
-
+	idStr := r.PathValue("id")
+	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		logger.ErrorContext(r.Context(), "Error creating task", err, map[string]interface{}{
-			"user_id": claims.UserID,
-			"title":   newTask.Title,
-		})
-		return errors.NewDatabaseError().WithCause(err)
+		return errors.NewBadRequestError("Invalid task ID")
 	}
 
-	logger.InfoContext(r.Context(), "Task created successfully", map[string]interface{}{
-		"task_id": createdTask.ID,
-		"user_id": claims.UserID,
-		"title":   createdTask.Title,
-	})
+	var t models.TaskDB
+	var assigneeID sql.NullInt64
+	var assigneeUsername, assigneeAvatarURL sql.NullString
 
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(createdTask)
-	return nil
-}
-
-// getTaskByID retourne une tâche spécifique si elle appartient à l'utilisateur
-func getTaskByID(w http.ResponseWriter, r *http.Request, id int) error {
-	claims, ok := r.Context().Value(middleware.UserContextKey).(*models.Claims)
-	if !ok {
-		logger.ErrorContext(r.Context(), "Missing user context in authenticated request", nil)
-		return errors.NewInternalError().WithDetails(map[string]interface{}{
-			"issue": "user_context_missing",
-		})
-	}
-
-	var task models.Task
 	startTime := time.Now()
-	err := database.DB.QueryRow(
-		"SELECT id, title, description, completed, user_id FROM tasks WHERE id = $1 AND user_id = $2",
-		id, claims.UserID,
-	).Scan(&task.ID, &task.Title, &task.Description, &task.Completed, &task.UserID)
+	err = database.DB.QueryRow(`
+		SELECT t.id, t.title, t.description, t.column_id, t."order", t.priority,
+			t.assignee_id, t.deadline, t.estimated_time, t.tracked_time, t.tags,
+			t.created_by, t.user_id, t.created_at, t.updated_at,
+			u.id, u.username, u.avatar_url
+		FROM tasks t
+		LEFT JOIN users u ON t.assignee_id = u.id
+		WHERE t.id = $1
+	`, id).Scan(
+		&t.ID, &t.Title, &t.Description, &t.ColumnID, &t.Order, &t.Priority,
+		&t.AssigneeID, &t.Deadline, &t.EstimatedTime, &t.TrackedTime, &t.Tags,
+		&t.CreatedBy, &t.UserID, &t.CreatedAt, &t.UpdatedAt,
+		&assigneeID, &assigneeUsername, &assigneeAvatarURL,
+	)
 	logger.LogDatabaseOperation(r.Context(), "SELECT", "tasks", time.Since(startTime), err)
-	metrics.RecordDatabaseOperation("SELECT", "tasks", time.Since(startTime), err)
 
 	if err == sql.ErrNoRows {
-		logger.WarnContext(r.Context(), "Task not found or access denied", map[string]interface{}{
-			"task_id": id,
-			"user_id": claims.UserID,
-		})
-		return errors.NewNotFoundError("Task")
+		return errors.NewNotFoundError("Task not found")
 	} else if err != nil {
-		logger.ErrorContext(r.Context(), "Error fetching task", err, map[string]interface{}{
-			"task_id": id,
-			"user_id": claims.UserID,
-		})
+		logger.ErrorContext(r.Context(), "Error fetching task", err)
 		return errors.NewDatabaseError().WithCause(err)
+	}
+
+	task := t.ToTask()
+	if assigneeID.Valid {
+		task.Assignee = &models.UserBrief{
+			ID:       int(assigneeID.Int64),
+			Username: assigneeUsername.String,
+		}
+		if assigneeAvatarURL.Valid {
+			task.Assignee.AvatarURL = assigneeAvatarURL.String
+		}
 	}
 
 	json.NewEncoder(w).Encode(task)
 	return nil
 }
 
-// updateTask met à jour une tâche si elle appartient à l'utilisateur
-func updateTask(w http.ResponseWriter, r *http.Request, id int) error {
+// CreateTask handles POST /tasks
+func CreateTask(w http.ResponseWriter, r *http.Request) error {
+	w.Header().Set("Content-Type", "application/json")
+
 	claims, ok := r.Context().Value(middleware.UserContextKey).(*models.Claims)
 	if !ok {
-		logger.ErrorContext(r.Context(), "Missing user context in authenticated request", nil)
 		return errors.NewInternalError().WithDetails(map[string]interface{}{
 			"issue": "user_context_missing",
 		})
 	}
 
-	var updatedTask models.Task
-	if err := json.NewDecoder(r.Body).Decode(&updatedTask); err != nil {
-		logger.WarnContext(r.Context(), "Invalid JSON in update task request", map[string]interface{}{
-			"error": err.Error(),
-		})
+	var req models.CreateTaskRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return errors.NewInvalidJSONError()
 	}
 
-	// Validation
-	if validationErr := validation.ValidateTaskInput(updatedTask.Title, updatedTask.Description); validationErr != nil {
-		return validationErr
+	if req.Title == "" {
+		return errors.NewBadRequestError("Title is required")
+	}
+	if req.ColumnID == 0 {
+		return errors.NewBadRequestError("ColumnID is required")
 	}
 
-	// Mettre à jour la tâche dans la base de données
-	var result models.Task
-	startTime := time.Now()
-	err := database.DB.QueryRow(
-		"UPDATE tasks SET title = $1, description = $2, completed = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4 AND user_id = $5 RETURNING id, title, description, completed, user_id",
-		updatedTask.Title, updatedTask.Description, updatedTask.Completed, id, claims.UserID,
-	).Scan(&result.ID, &result.Title, &result.Description, &result.Completed, &result.UserID)
-	logger.LogDatabaseOperation(r.Context(), "UPDATE", "tasks", time.Since(startTime), err)
-	metrics.RecordDatabaseOperation("UPDATE", "tasks", time.Since(startTime), err)
+	// Set defaults
+	if req.Priority == "" {
+		req.Priority = models.PriorityMedium
+	}
+	if req.Tags == nil {
+		req.Tags = []string{}
+	}
 
-	if err == sql.ErrNoRows {
-		logger.WarnContext(r.Context(), "Task not found for update or access denied", map[string]interface{}{
-			"task_id": id,
-			"user_id": claims.UserID,
-		})
-		return errors.NewNotFoundError("Task")
-	} else if err != nil {
-		logger.ErrorContext(r.Context(), "Error updating task", err, map[string]interface{}{
-			"task_id": id,
-			"user_id": claims.UserID,
-		})
+	// Get max order in column
+	var maxOrder int
+	startTime := time.Now()
+	err := database.DB.QueryRow(`SELECT COALESCE(MAX("order"), -1) FROM tasks WHERE column_id = $1`, req.ColumnID).Scan(&maxOrder)
+	logger.LogDatabaseOperation(r.Context(), "SELECT MAX", "tasks", time.Since(startTime), err)
+	if err != nil {
+		logger.ErrorContext(r.Context(), "Error getting max order", err)
 		return errors.NewDatabaseError().WithCause(err)
 	}
 
-	logger.InfoContext(r.Context(), "Task updated successfully", map[string]interface{}{
-		"task_id": result.ID,
-		"user_id": claims.UserID,
-		"title":   result.Title,
+	// Insert task
+	var t models.TaskDB
+	startTime = time.Now()
+	err = database.DB.QueryRow(`
+		INSERT INTO tasks (title, description, column_id, "order", priority, assignee_id, deadline, estimated_time, tags, created_by, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
+		RETURNING id, title, description, column_id, "order", priority, assignee_id, deadline, estimated_time, tracked_time, tags, created_by, user_id, created_at, updated_at
+	`,
+		req.Title, req.Description, req.ColumnID, maxOrder+1, req.Priority,
+		req.AssigneeID, req.Deadline, req.EstimatedTime, pq.Array(req.Tags), claims.UserID,
+	).Scan(
+		&t.ID, &t.Title, &t.Description, &t.ColumnID, &t.Order, &t.Priority,
+		&t.AssigneeID, &t.Deadline, &t.EstimatedTime, &t.TrackedTime, &t.Tags,
+		&t.CreatedBy, &t.UserID, &t.CreatedAt, &t.UpdatedAt,
+	)
+	logger.LogDatabaseOperation(r.Context(), "INSERT", "tasks", time.Since(startTime), err)
+
+	if err != nil {
+		logger.ErrorContext(r.Context(), "Error creating task", err)
+		return errors.NewDatabaseError().WithCause(err)
+	}
+
+	task := t.ToTask()
+
+	// Fetch assignee if set
+	if t.AssigneeID != nil {
+		var assignee models.UserBrief
+		var avatarURL sql.NullString
+		err = database.DB.QueryRow(`SELECT id, username, avatar_url FROM users WHERE id = $1`, *t.AssigneeID).
+			Scan(&assignee.ID, &assignee.Username, &avatarURL)
+		if err == nil {
+			if avatarURL.Valid {
+				assignee.AvatarURL = avatarURL.String
+			}
+			task.Assignee = &assignee
+		}
+	}
+
+	logger.InfoContext(r.Context(), "Task created", map[string]interface{}{
+		"task_id":   task.ID,
+		"column_id": task.ColumnID,
+		"user_id":   claims.UserID,
 	})
 
-	json.NewEncoder(w).Encode(result)
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(task)
 	return nil
 }
 
-// deleteTask supprime une tâche si elle appartient à l'utilisateur
-func deleteTask(w http.ResponseWriter, r *http.Request, id int) error {
-	claims, ok := r.Context().Value(middleware.UserContextKey).(*models.Claims)
-	if !ok {
-		logger.ErrorContext(r.Context(), "Missing user context in authenticated request", nil)
-		return errors.NewInternalError().WithDetails(map[string]interface{}{
-			"issue": "user_context_missing",
-		})
+// UpdateTask handles PUT /tasks/{id}
+func UpdateTask(w http.ResponseWriter, r *http.Request) error {
+	w.Header().Set("Content-Type", "application/json")
+
+	idStr := r.PathValue("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return errors.NewBadRequestError("Invalid task ID")
 	}
 
-	// Supprimer la tâche de la base de données
+	var req models.UpdateTaskRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return errors.NewInvalidJSONError()
+	}
+
+	// Check if task exists
+	var existingID int
 	startTime := time.Now()
-	result, err := database.DB.Exec("DELETE FROM tasks WHERE id = $1 AND user_id = $2", id, claims.UserID)
+	err = database.DB.QueryRow("SELECT id FROM tasks WHERE id = $1", id).Scan(&existingID)
+	logger.LogDatabaseOperation(r.Context(), "SELECT", "tasks", time.Since(startTime), err)
+
+	if err == sql.ErrNoRows {
+		return errors.NewNotFoundError("Task not found")
+	} else if err != nil {
+		logger.ErrorContext(r.Context(), "Error checking task", err)
+		return errors.NewDatabaseError().WithCause(err)
+	}
+
+	// Update task
+	var t models.TaskDB
+	startTime = time.Now()
+	err = database.DB.QueryRow(`
+		UPDATE tasks SET
+			title = COALESCE(NULLIF($1, ''), title),
+			description = COALESCE($2, description),
+			column_id = CASE WHEN $3 > 0 THEN $3 ELSE column_id END,
+			priority = COALESCE(NULLIF($4, ''), priority),
+			assignee_id = $5,
+			deadline = $6,
+			estimated_time = CASE WHEN $7 > 0 THEN $7 ELSE estimated_time END,
+			tags = COALESCE($8, tags),
+			updated_at = NOW()
+		WHERE id = $9
+		RETURNING id, title, description, column_id, "order", priority, assignee_id, deadline, estimated_time, tracked_time, tags, created_by, user_id, created_at, updated_at
+	`,
+		req.Title, req.Description, req.ColumnID, req.Priority,
+		req.AssigneeID, req.Deadline, req.EstimatedTime, pq.Array(req.Tags), id,
+	).Scan(
+		&t.ID, &t.Title, &t.Description, &t.ColumnID, &t.Order, &t.Priority,
+		&t.AssigneeID, &t.Deadline, &t.EstimatedTime, &t.TrackedTime, &t.Tags,
+		&t.CreatedBy, &t.UserID, &t.CreatedAt, &t.UpdatedAt,
+	)
+	logger.LogDatabaseOperation(r.Context(), "UPDATE", "tasks", time.Since(startTime), err)
+
+	if err != nil {
+		logger.ErrorContext(r.Context(), "Error updating task", err)
+		return errors.NewDatabaseError().WithCause(err)
+	}
+
+	task := t.ToTask()
+
+	// Fetch assignee if set
+	if t.AssigneeID != nil {
+		var assignee models.UserBrief
+		var avatarURL sql.NullString
+		err = database.DB.QueryRow(`SELECT id, username, avatar_url FROM users WHERE id = $1`, *t.AssigneeID).
+			Scan(&assignee.ID, &assignee.Username, &avatarURL)
+		if err == nil {
+			if avatarURL.Valid {
+				assignee.AvatarURL = avatarURL.String
+			}
+			task.Assignee = &assignee
+		}
+	}
+
+	json.NewEncoder(w).Encode(task)
+	return nil
+}
+
+// MoveTask handles PATCH /tasks/{id}/move
+func MoveTask(w http.ResponseWriter, r *http.Request) error {
+	w.Header().Set("Content-Type", "application/json")
+
+	idStr := r.PathValue("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return errors.NewBadRequestError("Invalid task ID")
+	}
+
+	var req models.MoveTaskRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return errors.NewInvalidJSONError()
+	}
+
+	// Update task position
+	var t models.TaskDB
+	startTime := time.Now()
+	err = database.DB.QueryRow(`
+		UPDATE tasks SET column_id = $1, "order" = $2, updated_at = NOW()
+		WHERE id = $3
+		RETURNING id, title, description, column_id, "order", priority, assignee_id, deadline, estimated_time, tracked_time, tags, created_by, user_id, created_at, updated_at
+	`, req.ColumnID, req.Order, id).Scan(
+		&t.ID, &t.Title, &t.Description, &t.ColumnID, &t.Order, &t.Priority,
+		&t.AssigneeID, &t.Deadline, &t.EstimatedTime, &t.TrackedTime, &t.Tags,
+		&t.CreatedBy, &t.UserID, &t.CreatedAt, &t.UpdatedAt,
+	)
+	logger.LogDatabaseOperation(r.Context(), "UPDATE", "tasks", time.Since(startTime), err)
+
+	if err == sql.ErrNoRows {
+		return errors.NewNotFoundError("Task not found")
+	} else if err != nil {
+		logger.ErrorContext(r.Context(), "Error moving task", err)
+		return errors.NewDatabaseError().WithCause(err)
+	}
+
+	task := t.ToTask()
+
+	// Fetch assignee if set
+	if t.AssigneeID != nil {
+		var assignee models.UserBrief
+		var avatarURL sql.NullString
+		err = database.DB.QueryRow(`SELECT id, username, avatar_url FROM users WHERE id = $1`, *t.AssigneeID).
+			Scan(&assignee.ID, &assignee.Username, &avatarURL)
+		if err == nil {
+			if avatarURL.Valid {
+				assignee.AvatarURL = avatarURL.String
+			}
+			task.Assignee = &assignee
+		}
+	}
+
+	json.NewEncoder(w).Encode(task)
+	return nil
+}
+
+// ReorderTasks handles PATCH /tasks/reorder
+func ReorderTasks(w http.ResponseWriter, r *http.Request) error {
+	w.Header().Set("Content-Type", "application/json")
+
+	var req models.ReorderTasksRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return errors.NewInvalidJSONError()
+	}
+
+	if req.ColumnID == 0 {
+		return errors.NewBadRequestError("columnId is required")
+	}
+	if len(req.TaskIDs) == 0 {
+		return errors.NewBadRequestError("taskIds is required")
+	}
+
+	// Update each task's order
+	for i, taskID := range req.TaskIDs {
+		startTime := time.Now()
+		result, err := database.DB.Exec(`UPDATE tasks SET "order" = $1, updated_at = NOW() WHERE id = $2 AND column_id = $3`, i, taskID, req.ColumnID)
+		logger.LogDatabaseOperation(r.Context(), "UPDATE", "tasks", time.Since(startTime), err)
+
+		if err != nil {
+			logger.ErrorContext(r.Context(), "Error updating task order", err)
+			return errors.NewDatabaseError().WithCause(err)
+		}
+
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected == 0 {
+			return errors.NewNotFoundError("Task not found in column: " + strconv.Itoa(taskID))
+		}
+	}
+
+	// Return updated tasks for the column
+	startTime := time.Now()
+	rows, err := database.DB.Query(`
+		SELECT t.id, t.title, t.description, t.column_id, t."order", t.priority,
+			t.assignee_id, t.deadline, t.estimated_time, t.tracked_time, t.tags,
+			t.created_by, t.user_id, t.created_at, t.updated_at,
+			u.id, u.username, u.avatar_url
+		FROM tasks t
+		LEFT JOIN users u ON t.assignee_id = u.id
+		WHERE t.column_id = $1
+		ORDER BY t."order" ASC
+	`, req.ColumnID)
+	logger.LogDatabaseOperation(r.Context(), "SELECT", "tasks", time.Since(startTime), err)
+
+	if err != nil {
+		logger.ErrorContext(r.Context(), "Error querying tasks", err)
+		return errors.NewDatabaseError().WithCause(err)
+	}
+	defer rows.Close()
+
+	tasks := []models.Task{}
+	for rows.Next() {
+		var t models.TaskDB
+		var assigneeID sql.NullInt64
+		var assigneeUsername, assigneeAvatarURL sql.NullString
+
+		err := rows.Scan(
+			&t.ID, &t.Title, &t.Description, &t.ColumnID, &t.Order, &t.Priority,
+			&t.AssigneeID, &t.Deadline, &t.EstimatedTime, &t.TrackedTime, &t.Tags,
+			&t.CreatedBy, &t.UserID, &t.CreatedAt, &t.UpdatedAt,
+			&assigneeID, &assigneeUsername, &assigneeAvatarURL,
+		)
+		if err != nil {
+			logger.ErrorContext(r.Context(), "Error scanning task row", err)
+			return errors.NewDatabaseError().WithCause(err)
+		}
+
+		task := t.ToTask()
+		if assigneeID.Valid {
+			task.Assignee = &models.UserBrief{
+				ID:       int(assigneeID.Int64),
+				Username: assigneeUsername.String,
+			}
+			if assigneeAvatarURL.Valid {
+				task.Assignee.AvatarURL = assigneeAvatarURL.String
+			}
+		}
+		tasks = append(tasks, task)
+	}
+
+	json.NewEncoder(w).Encode(tasks)
+	return nil
+}
+
+// DeleteTask handles DELETE /tasks/{id}
+func DeleteTask(w http.ResponseWriter, r *http.Request) error {
+	w.Header().Set("Content-Type", "application/json")
+
+	idStr := r.PathValue("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return errors.NewBadRequestError("Invalid task ID")
+	}
+
+	startTime := time.Now()
+	result, err := database.DB.Exec("DELETE FROM tasks WHERE id = $1", id)
 	logger.LogDatabaseOperation(r.Context(), "DELETE", "tasks", time.Since(startTime), err)
-	metrics.RecordDatabaseOperation("DELETE", "tasks", time.Since(startTime), err)
-	
+
 	if err != nil {
-		logger.ErrorContext(r.Context(), "Error deleting task", err, map[string]interface{}{
-			"task_id": id,
-			"user_id": claims.UserID,
-		})
+		logger.ErrorContext(r.Context(), "Error deleting task", err)
 		return errors.NewDatabaseError().WithCause(err)
 	}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		logger.ErrorContext(r.Context(), "Error checking deletion result", err)
-		return errors.NewDatabaseError().WithCause(err)
-	}
-
+	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		logger.WarnContext(r.Context(), "Task not found for deletion or access denied", map[string]interface{}{
-			"task_id": id,
-			"user_id": claims.UserID,
-		})
-		return errors.NewNotFoundError("Task")
+		return errors.NewNotFoundError("Task not found")
 	}
-
-	logger.InfoContext(r.Context(), "Task deleted successfully", map[string]interface{}{
-		"task_id": id,
-		"user_id": claims.UserID,
-	})
 
 	w.WriteHeader(http.StatusNoContent)
 	return nil
-} 
+}
