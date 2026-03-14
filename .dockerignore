@@ -30,3 +30,23 @@ dist/
 # Fichiers d'environnement
 .env
 .env.local
+.env.example
+*.prod
+*.prod.yaml
+
+# Scripts locaux
+deploy.sh
+*.sh
+
+# Monitoring (pas nécessaire dans l'image)
+monitoring/
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Claude
+.claude
