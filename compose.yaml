@@ -1,5 +1,5 @@
 services:
-  # API Go
+  # API Go — toujours démarré
   api:
     build: .
     ports:
@@ -18,17 +18,20 @@ services:
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
       - MINIO_BUCKET=${MINIO_BUCKET}
       - MINIO_USE_SSL=${MINIO_USE_SSL}
-    depends_on:
-      - postgres
-      - minio
     networks:
       - app-network
     restart: unless-stopped
     labels:
       - "logging=promtail"
 
-  # Base de données PostgreSQL
+  # ============================================================
+  # Profil: db
+  # À utiliser si PostgreSQL et MinIO ne sont pas déjà disponibles
+  # docker compose --profile db up -d
+  # ============================================================
+
   postgres:
+    profiles: [db]
     image: postgres:15-alpine
     environment:
       - POSTGRES_DB=${POSTGRES_DB}
@@ -38,13 +41,12 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - app-network
     restart: unless-stopped
 
-  # pgAdmin pour gérer la base de données (optionnel)
   pgadmin:
+    profiles: [db]
     image: dpage/pgadmin4:latest
     environment:
       - PGADMIN_DEFAULT_EMAIL=${PGADMIN_DEFAULT_EMAIL}
@@ -57,10 +59,9 @@ services:
       - app-network
     restart: unless-stopped
 
-  # MinIO - Object storage pour les fichiers
   minio:
+    profiles: [db]
     image: minio/minio:latest
-    container_name: minio
     environment:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
@@ -79,12 +80,28 @@ services:
       timeout: 20s
       retries: 3
 
-  # Observability Stack
-  
-  # Prometheus - Metrics collection
+  postgres-exporter:
+    profiles: [db]
+    image: prometheuscommunity/postgres-exporter:latest
+    ports:
+      - "9187:9187"
+    environment:
+      - DATA_SOURCE_NAME=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+    networks:
+      - app-network
+    restart: unless-stopped
+    depends_on:
+      - postgres
+
+  # ============================================================
+  # Profil: monitoring
+  # À utiliser si Prometheus/Grafana/Loki ne sont pas déjà disponibles
+  # docker compose --profile monitoring up -d
+  # ============================================================
+
   prometheus:
+    profiles: [monitoring]
     image: prom/prometheus:latest
-    container_name: prometheus
     ports:
       - "9090:9090"
     volumes:
@@ -103,10 +120,9 @@ services:
       - app-network
     restart: unless-stopped
 
-  # Grafana - Visualization and dashboards
   grafana:
+    profiles: [monitoring]
     image: grafana/grafana:latest
-    container_name: grafana
     ports:
       - "3001:3000"
     volumes:
@@ -127,10 +143,9 @@ services:
     depends_on:
       - prometheus
 
-  # Init container to create Loki directories
   loki-init:
+    profiles: [monitoring]
     image: alpine:latest
-    container_name: loki-init
     volumes:
       - loki_data:/tmp/loki
     command: |
@@ -142,10 +157,9 @@ services:
     networks:
       - app-network
 
-  # Loki - Log aggregation
   loki:
+    profiles: [monitoring]
     image: grafana/loki:latest
-    container_name: loki
     user: "10001:10001"
     ports:
       - "3100:3100"
@@ -161,10 +175,9 @@ services:
     depends_on:
       - loki-init
 
-  # Promtail - Log shipping agent
   promtail:
+    profiles: [monitoring]
     image: grafana/promtail:latest
-    container_name: promtail
     volumes:
       - ./monitoring/promtail/promtail.yml:/etc/promtail/config.yml
       - /var/run/docker.sock:/var/run/docker.sock
@@ -177,10 +190,9 @@ services:
     depends_on:
       - loki
 
-  # Node Exporter - System metrics
   node-exporter:
+    profiles: [monitoring]
     image: prom/node-exporter:latest
-    container_name: node-exporter
     ports:
       - "9100:9100"
     volumes:
@@ -195,20 +207,6 @@ services:
     networks:
       - app-network
     restart: unless-stopped
-
-  # Postgres Exporter - PostgreSQL metrics
-  postgres-exporter:
-    image: prometheuscommunity/postgres-exporter:latest
-    container_name: postgres-exporter
-    ports:
-      - "9187:9187"
-    environment:
-      - DATA_SOURCE_NAME=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
-    networks:
-      - app-network
-    restart: unless-stopped
-    depends_on:
-      - postgres
 
 volumes:
   postgres_data:

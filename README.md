@@ -41,17 +41,34 @@ Modifier les valeurs dans `.env` si nécessaire.
 
 ### 2. Lancer les services
 
+Le compose utilise des **profils** pour éviter les doublons quand une partie de l'infra existe déjà.
+
+| Profil | Services inclus |
+|--------|----------------|
+| _(aucun)_ | API uniquement |
+| `db` | PostgreSQL, pgAdmin, MinIO, postgres-exporter |
+| `monitoring` | Prometheus, Grafana, Loki, Promtail, node-exporter |
+
 ```bash
+# Projet standalone complet (DB + monitoring inclus)
+docker compose --profile db --profile monitoring up -d --build
+
+# API seule (DB et monitoring gérés par l'infra existante)
 docker compose up -d --build
+
+# API + DB uniquement
+docker compose --profile db up -d --build
 ```
 
-Services disponibles :
+Services disponibles selon les profils actifs :
 
-| Service | URL |
-|---------|-----|
-| API | http://localhost:8080 |
-| MinIO Console | http://localhost:9001 |
-| pgAdmin | http://localhost:5050 |
+| Service | URL | Profil |
+|---------|-----|--------|
+| API | http://localhost:8080 | toujours |
+| MinIO Console | http://localhost:9001 | `db` |
+| pgAdmin | http://localhost:5050 | `db` |
+| Prometheus | http://localhost:9090 | `monitoring` |
+| Grafana | http://localhost:3001 | `monitoring` |
 
 ## Déploiement en production
 
@@ -244,6 +261,24 @@ POST    /media/confirm
 GET     /media
 GET|DELETE /media/{id}
 GET     /media/{id}/download
+```
+
+## Monitoring
+
+La stack monitoring inclut **Prometheus**, **Grafana**, **Loki** et **Promtail**.
+
+- Prometheus scrape `/metrics` toutes les 10s + alertes préconfigurées (error rate, latence, API down)
+- Grafana avec datasources et dashboards auto-provisionnés
+- Loki + Promtail pour l'agrégation des logs de tous les containers
+
+### Lors d'un fork
+
+Mettre à jour le regex dans `monitoring/promtail/promtail.yml` avec le nom de ton projet :
+
+```yaml
+# Remplacer sandbox-api-go par le nom de ton projet
+- source_labels: ['__meta_docker_container_name']
+  regex: '/sandbox-api-go-(.*)-.*'
 ```
 
 ## Sécurité
