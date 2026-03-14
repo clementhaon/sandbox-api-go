@@ -2,5 +2,4 @@
 !.env.example
 *.prod
 *.prod.yaml
-deploy.sh
 .claude
