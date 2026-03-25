@@ -3,9 +3,9 @@ package middleware
 import (
 	"context"
 	"net/http"
-	"sandbox-api-go/auth"
-	"sandbox-api-go/errors"
-	"sandbox-api-go/logger"
+	"github.com/clementhaon/sandbox-api-go/auth"
+	"github.com/clementhaon/sandbox-api-go/errors"
+	"github.com/clementhaon/sandbox-api-go/logger"
 	"strings"
 )
 

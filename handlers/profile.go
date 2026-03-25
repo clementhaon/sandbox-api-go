@@ -4,11 +4,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
-	"sandbox-api-go/database"
-	"sandbox-api-go/errors"
-	"sandbox-api-go/logger"
-	"sandbox-api-go/middleware"
-	"sandbox-api-go/models"
+	"github.com/clementhaon/sandbox-api-go/database"
+	"github.com/clementhaon/sandbox-api-go/errors"
+	"github.com/clementhaon/sandbox-api-go/logger"
+	"github.com/clementhaon/sandbox-api-go/middleware"
+	"github.com/clementhaon/sandbox-api-go/models"
 	"time"
 )
 

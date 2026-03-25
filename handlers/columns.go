@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"time"
 
-	"sandbox-api-go/database"
-	"sandbox-api-go/errors"
-	"sandbox-api-go/logger"
-	"sandbox-api-go/models"
+	"github.com/clementhaon/sandbox-api-go/database"
+	"github.com/clementhaon/sandbox-api-go/errors"
+	"github.com/clementhaon/sandbox-api-go/logger"
+	"github.com/clementhaon/sandbox-api-go/models"
 )
 
 // ListColumns handles GET /columns - returns ordered list of columns

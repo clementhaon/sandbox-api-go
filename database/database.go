@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"sandbox-api-go/config"
+	"github.com/clementhaon/sandbox-api-go/config"
 	_ "github.com/lib/pq"
 )
 

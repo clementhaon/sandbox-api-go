@@ -3,9 +3,9 @@ package handlers
 import (
 	"net/http"
 
-	"sandbox-api-go/auth"
-	"sandbox-api-go/logger"
-	"sandbox-api-go/websocket"
+	"github.com/clementhaon/sandbox-api-go/auth"
+	"github.com/clementhaon/sandbox-api-go/logger"
+	"github.com/clementhaon/sandbox-api-go/websocket"
 
 	"github.com/google/uuid"
 	ws "github.com/gorilla/websocket"

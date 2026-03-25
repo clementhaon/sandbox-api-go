@@ -1,4 +1,4 @@
-module sandbox-api-go
+module github.com/clementhaon/sandbox-api-go
 
 go 1.26.1
 

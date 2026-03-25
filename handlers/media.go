@@ -5,14 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sandbox-api-go/database"
-	"sandbox-api-go/errors"
-	"sandbox-api-go/logger"
-	"sandbox-api-go/models"
-	"sandbox-api-go/storage"
+	"github.com/clementhaon/sandbox-api-go/database"
+	"github.com/clementhaon/sandbox-api-go/errors"
+	"github.com/clementhaon/sandbox-api-go/logger"
+	"github.com/clementhaon/sandbox-api-go/models"
+	"github.com/clementhaon/sandbox-api-go/storage"
 	"strconv"
 	"strings"
-	"sandbox-api-go/middleware"
+	"github.com/clementhaon/sandbox-api-go/middleware"
 )
 
 func HandleGetPresignedUploadURL(w http.ResponseWriter, r *http.Request) error {

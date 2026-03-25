@@ -4,9 +4,9 @@ import (
 	"context"
 	"net/http"
 	"runtime/debug"
-	"sandbox-api-go/errors"
-	"sandbox-api-go/logger"
-	"sandbox-api-go/metrics"
+	"github.com/clementhaon/sandbox-api-go/errors"
+	"github.com/clementhaon/sandbox-api-go/logger"
+	"github.com/clementhaon/sandbox-api-go/metrics"
 	"strings"
 	"time"
 )

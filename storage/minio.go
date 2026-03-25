@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
-	"sandbox-api-go/config"
-	"sandbox-api-go/logger"
+	"github.com/clementhaon/sandbox-api-go/config"
+	"github.com/clementhaon/sandbox-api-go/logger"
 	"strings"
 	"time"
 

@@ -3,7 +3,7 @@ package auth
 import (
 	"fmt"
 	"os"
-	"sandbox-api-go/models"
+	"github.com/clementhaon/sandbox-api-go/models"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"

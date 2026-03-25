@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
-	"sandbox-api-go/errors"
+	"github.com/clementhaon/sandbox-api-go/errors"
 )
 
 // ValidationRule represents a validation rule
