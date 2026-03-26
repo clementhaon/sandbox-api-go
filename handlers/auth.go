@@ -37,7 +37,7 @@ func HandleRegister(w http.ResponseWriter, r *http.Request) error {
 		return validationErr
 	}
 
-	// Vérifier si l'utilisateur existe déjà
+	// Check if user already exists
 	var existingUser models.User
 	startTime := time.Now()
 	err := database.DB.QueryRow("SELECT id FROM users WHERE username = $1 OR email = $2", req.Username, req.Email).Scan(&existingUser.ID)
@@ -50,14 +50,14 @@ func HandleRegister(w http.ResponseWriter, r *http.Request) error {
 		return errors.NewDatabaseError().WithCause(err)
 	}
 
-	// Hasher le mot de passe
+	// Hash the password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		logger.ErrorContext(r.Context(), "Error hashing password", err)
 		return errors.NewInternalError().WithCause(err)
 	}
 
-	// Créer le nouvel utilisateur dans la base de données
+	// Create the new user in the database
 	var newUser models.User
 	startTime = time.Now()
 	err = database.DB.QueryRow(
@@ -74,21 +74,21 @@ func HandleRegister(w http.ResponseWriter, r *http.Request) error {
 		return errors.NewDatabaseError().WithCause(err)
 	}
 
-	// Générer le token
+	// Generate the token
 	token, err := auth.GenerateToken(newUser)
 	if err != nil {
 		logger.ErrorContext(r.Context(), "Error generating JWT token", err)
 		return errors.NewInternalError().WithCause(err)
 	}
 
-	// Créer le cookie HTTPOnly sécurisé
+	// Create the secure HTTPOnly cookie
 	cookie := &http.Cookie{
 		Name:     "auth_token",
 		Value:    token,
 		Path:     "/",
-		MaxAge:   24 * 60 * 60, // 24 heures en secondes
-		HttpOnly: true,         // Empêche l'accès via JavaScript
-		Secure:   false,        // À mettre à true en production avec HTTPS
+		MaxAge:   24 * 60 * 60, // 24 hours in seconds
+		HttpOnly: true,         // Prevents access via JavaScript
+		Secure:   false,        // Set to true in production with HTTPS
 		SameSite: http.SameSiteStrictMode,
 	}
 	http.SetCookie(w, cookie)
@@ -104,11 +104,11 @@ func HandleRegister(w http.ResponseWriter, r *http.Request) error {
 	}
 	metrics.RecordAuthAttempt("register", "success")
 
-	// Réponse sans le token (maintenant dans le cookie)
+	// Response without the token (now in the cookie)
 	response := models.AuthResponse{
-		Token:   "", // Token retiré de la réponse JSON
+		Token:   "", // Token removed from JSON response
 		User:    newUser,
-		Message: "Inscription réussie",
+		Message: "Registration successful",
 	}
 
 	w.WriteHeader(http.StatusCreated)
@@ -137,7 +137,7 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) error {
 		return validationErr
 	}
 
-	// Chercher l'utilisateur dans la base de données
+	// Look up the user in the database
 	var foundUser models.User
 	var hashedPassword string
 	startTime := time.Now()
@@ -160,7 +160,7 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) error {
 		return errors.NewDatabaseError().WithCause(err)
 	}
 
-	// Vérifier le mot de passe
+	// Verify the password
 	if err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(req.Password)); err != nil {
 		logger.WarnContext(r.Context(), "Login attempt with invalid password", map[string]interface{}{
 			"user_id": foundUser.ID,
@@ -169,7 +169,7 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) error {
 		return errors.NewInvalidCredentialsError()
 	}
 
-	// Mettre à jour last_login_at
+	// Update last_login_at
 	startTime = time.Now()
 	_, err = database.DB.Exec("UPDATE users SET last_login_at = NOW() WHERE id = $1", foundUser.ID)
 	logger.LogDatabaseOperation(r.Context(), "UPDATE", "users", time.Since(startTime), err)
@@ -181,21 +181,21 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) error {
 		// Non-blocking error, continue with login
 	}
 
-	// Générer le token
+	// Generate the token
 	token, err := auth.GenerateToken(foundUser)
 	if err != nil {
 		logger.ErrorContext(r.Context(), "Error generating JWT token for login", err)
 		return errors.NewInternalError().WithCause(err)
 	}
 
-	// Créer le cookie HTTPOnly sécurisé
+	// Create the secure HTTPOnly cookie
 	cookie := &http.Cookie{
 		Name:     "auth_token",
 		Value:    token,
 		Path:     "/",
-		MaxAge:   24 * 60 * 60, // 24 heures en secondes
-		HttpOnly: true,         // Empêche l'accès via JavaScript
-		Secure:   false,        // À mettre à true en production avec HTTPS
+		MaxAge:   24 * 60 * 60, // 24 hours in seconds
+		HttpOnly: true,         // Prevents access via JavaScript
+		Secure:   false,        // Set to true in production with HTTPS
 		SameSite: http.SameSiteStrictMode,
 	}
 	http.SetCookie(w, cookie)
@@ -208,11 +208,11 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) error {
 	})
 	metrics.RecordAuthAttempt("login", "success")
 
-	// Réponse sans le token (maintenant dans le cookie)
+	// Response without the token (now in the cookie)
 	response := models.AuthResponse{
-		Token:   "", // Token retiré de la réponse JSON
+		Token:   "", // Token removed from JSON response
 		User:    foundUser,
-		Message: "Connexion réussie",
+		Message: "Login successful",
 	}
 
 	json.NewEncoder(w).Encode(response)
@@ -230,21 +230,21 @@ func HandleLogout(w http.ResponseWriter, r *http.Request) error {
 	// Log logout attempt
 	logger.InfoContext(r.Context(), "User logout requested")
 
-	// Supprimer le cookie en définissant MaxAge à -1
+	// Delete the cookie by setting MaxAge to -1
 	cookie := &http.Cookie{
 		Name:     "auth_token",
 		Value:    "",
 		Path:     "/",
-		MaxAge:   -1, // Supprime le cookie
+		MaxAge:   -1, // Deletes the cookie
 		HttpOnly: true,
 		Secure:   false,
 		SameSite: http.SameSiteStrictMode,
 	}
 	http.SetCookie(w, cookie)
 
-	// Réponse de confirmation
+	// Confirmation response
 	response := map[string]string{
-		"message": "Déconnexion réussie",
+		"message": "Logout successful",
 	}
 
 	json.NewEncoder(w).Encode(response)

@@ -47,7 +47,7 @@ func HandleGetPresignedUploadURL(w http.ResponseWriter, r *http.Request) error {
 	response := models.PresignedUploadURLResponse{
 		UploadURL: uploadURL,
 		ObjectKey: objectKey,
-		ExpiresIn: 604800, // 7 jours en secondes (7 * 24 * 60 * 60)
+		ExpiresIn: 604800, // 7 days in seconds (7 * 24 * 60 * 60)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -138,7 +138,7 @@ func HandleGetUserMedia(w http.ResponseWriter, r *http.Request) error {
 		})
 	}
 
-	// Récupérer la page depuis les query parameters (par défaut: 1)
+	// Get page from query parameters (default: 1)
 	page := 1
 	if pageParam := r.URL.Query().Get("page"); pageParam != "" {
 		if p, err := strconv.Atoi(pageParam); err == nil && p > 0 {
@@ -146,11 +146,11 @@ func HandleGetUserMedia(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
-	// Limite fixe de 50 items par page
+	// Fixed limit of 50 items per page
 	limit := 50
 	offset := (page - 1) * limit
 
-	// Compter le nombre total de médias pour cet utilisateur
+	// Count total media for this user
 	var totalCount int
 	countQuery := `SELECT COUNT(*) FROM media WHERE user_id = $1`
 	err := database.DB.QueryRow(countQuery, claims.UserID).Scan(&totalCount)
@@ -159,13 +159,13 @@ func HandleGetUserMedia(w http.ResponseWriter, r *http.Request) error {
 		return errors.NewInternalServerError("Failed to retrieve media count")
 	}
 
-	// Calculer le nombre total de pages
+	// Calculate total number of pages
 	totalPages := (totalCount + limit - 1) / limit
 	if totalPages == 0 {
 		totalPages = 1
 	}
 
-	// Récupérer les médias avec pagination
+	// Fetch media with pagination
 	query := `
 		SELECT id, user_id, object_key, bucket_name, original_filename, file_size, mime_type, created_at, updated_at
 		FROM media
@@ -199,11 +199,11 @@ func HandleGetUserMedia(w http.ResponseWriter, r *http.Request) error {
 			logger.Error("Failed to scan media row", err)
 			continue
 		}
-		// Générer une URL présignée pour accéder au fichier
+		// Generate a presigned URL to access the file
 		presignedURL, err := storage.GeneratePresignedDownloadURL(media.ObjectKey)
 		if err != nil {
 			logger.Error("Failed to generate presigned URL for media", err)
-			// En cas d'erreur, on peut mettre une URL vide ou continuer sans cette entrée
+			// On error, set an empty URL or skip this entry
 			media.URL = ""
 		} else {
 			media.URL = presignedURL
@@ -275,7 +275,7 @@ func HandleGetMediaByID(w http.ResponseWriter, r *http.Request) error {
 		return errors.NewInternalServerError("Failed to retrieve media")
 	}
 
-	// Générer une URL présignée pour accéder au fichier
+	// Generate a presigned URL to access the file
 	presignedURL, err := storage.GeneratePresignedDownloadURL(media.ObjectKey)
 	if err != nil {
 		logger.Error("Failed to generate presigned URL for media", err)
@@ -330,7 +330,7 @@ func HandleGetPresignedDownloadURL(w http.ResponseWriter, r *http.Request) error
 
 	response := models.PresignedDownloadURLResponse{
 		DownloadURL: downloadURL,
-		ExpiresIn:   604800, // 7 jours en secondes (7 * 24 * 60 * 60)
+		ExpiresIn:   604800, // 7 days in seconds (7 * 24 * 60 * 60)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

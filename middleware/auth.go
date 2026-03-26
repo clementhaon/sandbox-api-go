@@ -13,16 +13,16 @@ type contextKey string
 
 const UserContextKey contextKey = "user"
 
-// AuthMiddleware vérifie le token JWT dans les requêtes
+// AuthMiddleware validates the JWT token in requests
 func AuthMiddleware(handler ErrorHandler) http.HandlerFunc {
 	return ErrorMiddleware(func(w http.ResponseWriter, r *http.Request) error {
 		var token string
 
-		// Essayer de récupérer le token depuis le cookie d'abord
+		// Try to get token from cookie first
 		if cookie, err := r.Cookie("auth_token"); err == nil && cookie.Value != "" {
 			token = cookie.Value
 		} else {
-			// Fallback : récupérer le token depuis l'en-tête Authorization
+			// Fallback: get token from Authorization header
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
 				logger.WarnContext(r.Context(), "Authentication attempt without token")
@@ -31,7 +31,7 @@ func AuthMiddleware(handler ErrorHandler) http.HandlerFunc {
 				})
 			}
 
-			// Vérifier le format "Bearer <token>"
+			// Check "Bearer <token>" format
 			tokenParts := strings.Split(authHeader, " ")
 			if len(tokenParts) != 2 || tokenParts[0] != "Bearer" {
 				logger.WarnContext(r.Context(), "Invalid token format in Authorization header")
@@ -42,7 +42,7 @@ func AuthMiddleware(handler ErrorHandler) http.HandlerFunc {
 			token = tokenParts[1]
 		}
 
-		// Valider le token
+		// Validate the token
 		claims, err := auth.ValidateToken(token)
 		if err != nil {
 			logger.WarnContext(r.Context(), "Invalid or expired token", map[string]interface{}{
@@ -51,7 +51,7 @@ func AuthMiddleware(handler ErrorHandler) http.HandlerFunc {
 			return errors.NewInvalidTokenError().WithCause(err)
 		}
 
-		// Ajouter les informations utilisateur au contexte
+		// Add user information to context
 		ctx := context.WithValue(r.Context(), UserContextKey, claims)
 		ctx = context.WithValue(ctx, logger.UserIDKey, claims.UserID)
 

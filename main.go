@@ -30,13 +30,13 @@ func main() {
 	// Initialize metrics
 	metrics.InitAppInfo("2.0.0", "dev", time.Now().Format("2006-01-02"), runtime.Version())
 
-	// Initialisation de la base de données
+	// Initialize the database
 	if err := database.InitDB(); err != nil {
 		logger.Fatal("Failed to initialize database", err)
 	}
 	defer database.CloseDB()
 
-	// Initialisation de MinIO
+	// Initialize MinIO
 	if err := storage.InitMinIO(); err != nil {
 		logger.Fatal("Failed to initialize MinIO", err)
 	}
@@ -45,28 +45,28 @@ func main() {
 	websocket.Init()
 	logger.Info("WebSocket manager initialized")
 
-	// Création du serveur HTTP avec middleware de gestion d'erreurs
+	// Create the HTTP server with error handling middleware
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: middleware.PanicRecoveryMiddleware(middleware.RequestLoggingMiddleware(createMux())),
 	}
 
-	// Démarrage du serveur dans une goroutine
+	// Start the server in a goroutine
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Fatal("Failed to start server", err)
 		}
 	}()
 
-	// Attente des signaux d'interruption
+	// Wait for interrupt signals
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	logger.Info("Shutdown signal received")
-	fmt.Println("\n🛑 Arrêt du serveur...")
+	fmt.Println("\n🛑 Shutting down server...")
 
-	// Arrêt gracieux du serveur
+	// Gracefully shutdown the server
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -75,14 +75,14 @@ func main() {
 	}
 
 	logger.Info("Server shutdown completed")
-	fmt.Println("✅ Serveur arrêté proprement")
+	fmt.Println("✅ Server shut down cleanly")
 }
 
 // createMux crée et configure le routeur HTTP
 func createMux() http.Handler {
 	mux := http.NewServeMux()
 
-	// Routes publiques (pas d'authentification requise)
+	// Public routes (no authentication required)
 	mux.HandleFunc("/", middleware.ErrorMiddleware(handleHome))
 	mux.HandleFunc("/auth/register", middleware.ErrorMiddleware(handlers.HandleRegister))
 	mux.HandleFunc("/auth/login", middleware.ErrorMiddleware(handlers.HandleLogin))
@@ -157,7 +157,7 @@ func createMux() http.Handler {
 	return mux
 }
 
-// handleProfile dispatche les requêtes de profil selon la méthode HTTP
+// handleProfile dispatches profile requests based on the HTTP method
 func handleProfile(w http.ResponseWriter, r *http.Request) error {
 	switch r.Method {
 	case http.MethodGet:
@@ -169,16 +169,16 @@ func handleProfile(w http.ResponseWriter, r *http.Request) error {
 	}
 }
 
-// handleMediaRoutes dispatche les requêtes média selon le path et la méthode HTTP
+// handleMediaRoutes dispatches media requests based on path and HTTP method
 func handleMediaRoutes(w http.ResponseWriter, r *http.Request) error {
 	path := r.URL.Path
 
-	// /media/{id}/download - Obtenir une URL de téléchargement présignée
+	// /media/{id}/download - Get a presigned download URL
 	if len(path) > 7 && path[len(path)-9:] == "/download" {
 		return handlers.HandleGetPresignedDownloadURL(w, r)
 	}
 
-	// /media/{id} - Obtenir un média par ID ou le supprimer
+	// /media/{id} - Get a media by ID or delete it
 	switch r.Method {
 	case http.MethodGet:
 		return handlers.HandleGetMediaByID(w, r)
@@ -196,7 +196,7 @@ func handleHome(w http.ResponseWriter, r *http.Request) error {
 
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]interface{}{
-		"message": "Bienvenue dans l'API REST Go avec authentification! 🎉",
+		"message": "Welcome to the Go REST API with authentication! 🎉",
 		"version": "2.0.0",
 	}
 

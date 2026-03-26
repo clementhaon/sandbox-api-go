@@ -1,99 +1,99 @@
 # sandbox-api-go
 
-Boilerplate d'API REST en Go avec authentification JWT, PostgreSQL, MinIO et WebSocket.
+Go REST API boilerplate with JWT authentication, PostgreSQL, MinIO and WebSocket.
 
 ## Stack
 
 - **Go 1.26** — backend
-- **PostgreSQL** — base de données avec migrations automatiques
-- **MinIO** — stockage d'objets S3-compatible
-- **JWT** — authentification
-- **Prometheus** — métriques
-- **Docker / Docker Compose** — conteneurisation
+- **PostgreSQL** — database with automatic migrations
+- **MinIO** — S3-compatible object storage
+- **JWT** — authentication
+- **Prometheus** — metrics
+- **Docker / Docker Compose** — containerization
 
-## Fonctionnalités incluses
+## Included features
 
-- Authentification JWT (register, login, logout)
-- Gestion des utilisateurs et profils
-- Board Kanban (colonnes, tâches, réordonnancement)
+- JWT authentication (register, login, logout)
+- User and profile management
+- Kanban board (columns, tasks, reordering)
 - Time tracking
 - Notifications
-- Upload/download de médias via URLs présignées MinIO
-- WebSocket pour les notifications temps réel
-- Métriques Prometheus sur `/metrics`
-- Logs JSON structurés
-- Migrations automatiques au démarrage
+- Media upload/download via MinIO presigned URLs
+- WebSocket for real-time notifications
+- Prometheus metrics at `/metrics`
+- Structured JSON logs
+- Automatic migrations on startup
 
-## Démarrage local
+## Local setup
 
-### Prérequis
+### Prerequisites
 
 - Docker
 - Docker Compose
 
-### 1. Configurer l'environnement
+### 1. Configure the environment
 
 ```bash
 cp .env.example .env
 ```
 
-Modifier les valeurs dans `.env` si nécessaire.
+Edit the values in `.env` if needed.
 
-### 2. Lancer les services
+### 2. Start the services
 
-Le compose utilise des **profils** pour éviter les doublons quand une partie de l'infra existe déjà.
+The compose file uses **profiles** to avoid duplication when part of the infrastructure already exists.
 
-| Profil | Services inclus |
-|--------|----------------|
-| _(aucun)_ | API uniquement |
+| Profile | Included services |
+|---------|------------------|
+| _(none)_ | API only |
 | `db` | PostgreSQL, pgAdmin, MinIO, postgres-exporter |
 | `monitoring` | Prometheus, Grafana, Loki, Promtail, node-exporter |
 
 ```bash
-# Projet standalone complet (DB + monitoring inclus)
+# Full standalone project (DB + monitoring included)
 docker compose --profile db --profile monitoring up -d --build
 
-# API seule (DB et monitoring gérés par l'infra existante)
+# API only (DB and monitoring managed by existing infrastructure)
 docker compose up -d --build
 
-# API + DB uniquement
+# API + DB only
 docker compose --profile db up -d --build
 ```
 
-Services disponibles selon les profils actifs :
+Available services depending on active profiles:
 
-| Service | URL | Profil |
-|---------|-----|--------|
-| API | http://localhost:8080 | toujours |
+| Service | URL | Profile |
+|---------|-----|---------|
+| API | http://localhost:8080 | always |
 | MinIO Console | http://localhost:9001 | `db` |
 | pgAdmin | http://localhost:5050 | `db` |
 | Prometheus | http://localhost:9090 | `monitoring` |
 | Grafana | http://localhost:3001 | `monitoring` |
 
-## Déploiement en production
+## Production deployment
 
-Le déploiement repose sur un **registry Docker privé** et **nginxproxy/nginx-proxy** pour le routing.
+Deployment relies on a **private Docker registry** and **nginxproxy/nginx-proxy** for routing.
 
-### Prérequis serveur
+### Server prerequisites
 
 - Docker + Docker Compose
-- [nginxproxy/nginx-proxy](https://github.com/nginx-proxy/nginx-proxy) en cours d'exécution
-- Accès à un registry Docker privé
+- [nginxproxy/nginx-proxy](https://github.com/nginx-proxy/nginx-proxy) running
+- Access to a private Docker registry
 
-### 1. Configurer les variables de production
+### 1. Configure production variables
 
-Créer `.env.prod` sur le serveur à partir de `.env.example` :
+Create `.env.prod` on the server from `.env.example`:
 
 ```bash
 cp .env.example .env.prod
 chmod 600 .env.prod
 ```
 
-Variables importantes à modifier :
+Important variables to update:
 
 ```env
-DB_PASSWORD=mot_de_passe_fort
-JWT_SECRET=cle_jwt_longue_et_aleatoire
+DB_PASSWORD=strong_password
+JWT_SECRET=long_random_jwt_secret
 REGISTRY_URL=registry.example.com
 REGISTRY_USER=user
 REGISTRY_PASSWORD=password
@@ -101,34 +101,34 @@ IMAGE_NAME=sandbox-api-go
 IMAGE_TAG=latest
 ```
 
-Générer des secrets forts :
+Generate strong secrets:
 
 ```bash
 openssl rand -base64 32
 ```
 
-### 2. Builder et pusher l'image
+### 2. Build and push the image
 
-Depuis la machine de développement :
+From the development machine:
 
 ```bash
-# Charger les variables
+# Load variables
 source .env.prod
 
-# Build pour AMD64
+# Build for AMD64
 docker buildx build --platform linux/amd64 \
   -t ${REGISTRY_URL}/${IMAGE_NAME}:${IMAGE_TAG} --load .
 
-# Login et push
+# Login and push
 echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY_URL" \
   -u "$REGISTRY_USER" --password-stdin
 
 docker push ${REGISTRY_URL}/${IMAGE_NAME}:${IMAGE_TAG}
 ```
 
-### 3. Configurer compose.prod.yaml
+### 3. Configure compose.prod.yaml
 
-Le service doit exposer les variables `VIRTUAL_HOST` et `LETSENCRYPT_HOST` pour nginx-proxy :
+The service must expose the `VIRTUAL_HOST` and `LETSENCRYPT_HOST` variables for nginx-proxy:
 
 ```yaml
 services:
@@ -171,17 +171,17 @@ volumes:
 
 networks:
   proxy:
-    external: true   # réseau de nginx-proxy
+    external: true   # nginx-proxy network
   internal:
 ```
 
-### 4. Déployer sur le serveur
+### 4. Deploy on the server
 
 ```bash
-# Copier les fichiers de config
+# Copy config files
 scp compose.prod.yaml .env.prod user@server:/opt/app/
 
-# Se connecter et déployer
+# Connect and deploy
 ssh user@server
 cd /opt/app
 
@@ -190,29 +190,29 @@ docker compose -f compose.prod.yaml --env-file .env.prod pull
 docker compose -f compose.prod.yaml --env-file .env.prod up -d
 ```
 
-### 5. Vérifier le déploiement
+### 5. Verify the deployment
 
 ```bash
 docker compose -f compose.prod.yaml ps
 docker compose -f compose.prod.yaml logs -f api
 ```
 
-## Structure du projet
+## Project structure
 
 ```
 sandbox-api-go/
 ├── auth/               # JWT
-├── config/             # Variables d'environnement
-├── database/           # Init PostgreSQL + migrations
-│   └── migrations/     # Fichiers SQL
-├── errors/             # Types d'erreurs centralisés
-├── handlers/           # Handlers HTTP
-├── logger/             # Logs JSON structurés
+├── config/             # Environment variables
+├── database/           # PostgreSQL init + migrations
+│   └── migrations/     # SQL files
+├── errors/             # Centralized error types
+├── handlers/           # HTTP handlers
+├── logger/             # Structured JSON logs
 ├── metrics/            # Prometheus
 ├── middleware/         # Auth, logging, panic recovery
-├── models/             # Entités métier
-├── storage/            # Client MinIO
-├── validation/         # Validation des inputs
+├── models/             # Business entities
+├── storage/            # MinIO client
+├── validation/         # Input validation
 ├── websocket/          # WebSocket manager
 ├── Dockerfile
 ├── docker-compose.yml  # Dev
@@ -222,7 +222,7 @@ sandbox-api-go/
 
 ## Endpoints
 
-### Publics
+### Public
 
 ```
 POST   /auth/register
@@ -232,7 +232,7 @@ GET    /metrics
 GET    /ws
 ```
 
-### Authentifiés (JWT requis)
+### Authenticated (JWT required)
 
 ```
 GET|PUT /profile
@@ -265,25 +265,25 @@ GET     /media/{id}/download
 
 ## Monitoring
 
-La stack monitoring inclut **Prometheus**, **Grafana**, **Loki** et **Promtail**.
+The monitoring stack includes **Prometheus**, **Grafana**, **Loki** and **Promtail**.
 
-- Prometheus scrape `/metrics` toutes les 10s + alertes préconfigurées (error rate, latence, API down)
-- Grafana avec datasources et dashboards auto-provisionnés
-- Loki + Promtail pour l'agrégation des logs de tous les containers
+- Prometheus scrapes `/metrics` every 10s + preconfigured alerts (error rate, latency, API down)
+- Grafana with auto-provisioned datasources and dashboards
+- Loki + Promtail for log aggregation across all containers
 
-### Lors d'un fork
+### When forking
 
-Mettre à jour le regex dans `monitoring/promtail/promtail.yml` avec le nom de ton projet :
+Update the regex in `monitoring/promtail/promtail.yml` with your project name:
 
 ```yaml
-# Remplacer sandbox-api-go par le nom de ton projet
+# Replace sandbox-api-go with your project name
 - source_labels: ['__meta_docker_container_name']
   regex: '/sandbox-api-go-(.*)-.*'
 ```
 
-## Sécurité
+## Security
 
-Scanner les vulnérabilités de l'image :
+Scan the image for vulnerabilities:
 
 ```bash
 trivy image --ignore-unfixed sandbox-api-go

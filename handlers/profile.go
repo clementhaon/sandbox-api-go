@@ -20,7 +20,7 @@ func HandleGetProfile(w http.ResponseWriter, r *http.Request) error {
 		return errors.NewMethodNotAllowedError()
 	}
 
-	// Récupérer l'utilisateur depuis le contexte
+	// Get user from context
 	claims, ok := r.Context().Value(middleware.UserContextKey).(*models.Claims)
 
 	logger.Info("HandleGetProfile", map[string]interface{}{
@@ -33,7 +33,7 @@ func HandleGetProfile(w http.ResponseWriter, r *http.Request) error {
 		})
 	}
 
-	// Récupérer le profil complet depuis la base de données
+	// Fetch full profile from database
 	var user models.User
 	startTime := time.Now()
 	err := database.DB.QueryRow(
@@ -67,7 +67,7 @@ func HandleUpdateProfile(w http.ResponseWriter, r *http.Request) error {
 		return errors.NewMethodNotAllowedError()
 	}
 
-	// Récupérer l'utilisateur depuis le contexte
+	// Get user from context
 	claims, ok := r.Context().Value(middleware.UserContextKey).(*models.Claims)
 	if !ok {
 		logger.ErrorContext(r.Context(), "Missing user context in authenticated request", nil)
@@ -84,7 +84,7 @@ func HandleUpdateProfile(w http.ResponseWriter, r *http.Request) error {
 		return errors.NewInvalidJSONError()
 	}
 
-	// Préparer les valeurs pour la mise à jour
+	// Prepare values for update
 	var firstName, lastName, avatarURL sql.NullString
 
 	if req.FirstName != nil {
@@ -97,7 +97,7 @@ func HandleUpdateProfile(w http.ResponseWriter, r *http.Request) error {
 		avatarURL = sql.NullString{String: *req.AvatarURL, Valid: true}
 	}
 
-	// Mettre à jour le profil dans la base de données
+	// Update profile in the database
 	startTime := time.Now()
 	_, err := database.DB.Exec(
 		`UPDATE users
@@ -115,7 +115,7 @@ func HandleUpdateProfile(w http.ResponseWriter, r *http.Request) error {
 		return errors.NewDatabaseError().WithCause(err)
 	}
 
-	// Récupérer le profil mis à jour
+	// Fetch updated profile
 	var updatedUser models.User
 	startTime = time.Now()
 	err = database.DB.QueryRow(
@@ -137,7 +137,7 @@ func HandleUpdateProfile(w http.ResponseWriter, r *http.Request) error {
 	})
 
 	response := map[string]interface{}{
-		"message": "Profil mis à jour avec succès",
+		"message": "Profile updated successfully",
 		"user":    updatedUser,
 	}
 

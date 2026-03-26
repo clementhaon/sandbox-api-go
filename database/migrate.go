@@ -10,48 +10,48 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 )
 
-// RunMigrations exécute les migrations de base de données
+// RunMigrations runs database migrations
 func RunMigrations(db *sql.DB) error {
-	// Créer le driver postgres pour migrate
+	// Create the postgres driver for migrate
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
-		return fmt.Errorf("erreur lors de la création du driver postgres: %v", err)
+		return fmt.Errorf("error creating postgres driver: %v", err)
 	}
 
-	// Créer l'instance de migration
+	// Create the migration instance
 	m, err := migrate.NewWithDatabaseInstance(
 		"file://database/migrations",
 		"postgres",
 		driver,
 	)
 	if err != nil {
-		return fmt.Errorf("erreur lors de l'initialisation des migrations: %v", err)
+		return fmt.Errorf("error initializing migrations: %v", err)
 	}
 
-	// Exécuter les migrations
+	// Run migrations
 	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-		return fmt.Errorf("erreur lors de l'exécution des migrations: %v", err)
+		return fmt.Errorf("error running migrations: %v", err)
 	}
 
 	version, dirty, err := m.Version()
 	if err != nil && err != migrate.ErrNilVersion {
-		return fmt.Errorf("erreur lors de la récupération de la version: %v", err)
+		return fmt.Errorf("error getting migration version: %v", err)
 	}
 
 	if err == migrate.ErrNilVersion {
-		log.Println("✅ Base de données initialisée (aucune migration)")
+		log.Println("✅ Database initialized (no migrations)")
 	} else {
-		log.Printf("✅ Migrations appliquées avec succès (version: %d, dirty: %t)\n", version, dirty)
+		log.Printf("✅ Migrations applied successfully (version: %d, dirty: %t)\n", version, dirty)
 	}
 
 	return nil
 }
 
-// RollbackMigration rollback la dernière migration
+// RollbackMigration rolls back the last migration
 func RollbackMigration(db *sql.DB) error {
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
-		return fmt.Errorf("erreur lors de la création du driver postgres: %v", err)
+		return fmt.Errorf("error creating postgres driver: %v", err)
 	}
 
 	m, err := migrate.NewWithDatabaseInstance(
@@ -60,22 +60,22 @@ func RollbackMigration(db *sql.DB) error {
 		driver,
 	)
 	if err != nil {
-		return fmt.Errorf("erreur lors de l'initialisation des migrations: %v", err)
+		return fmt.Errorf("error initializing migrations: %v", err)
 	}
 
 	if err := m.Down(); err != nil && err != migrate.ErrNoChange {
-		return fmt.Errorf("erreur lors du rollback: %v", err)
+		return fmt.Errorf("error rolling back migrations: %v", err)
 	}
 
-	log.Println("✅ Rollback effectué avec succès")
+	log.Println("✅ Rollback completed successfully")
 	return nil
 }
 
-// GetMigrationVersion retourne la version actuelle de la migration
+// GetMigrationVersion returns the current migration version
 func GetMigrationVersion(db *sql.DB) (uint, bool, error) {
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
-		return 0, false, fmt.Errorf("erreur lors de la création du driver postgres: %v", err)
+		return 0, false, fmt.Errorf("error creating postgres driver: %v", err)
 	}
 
 	m, err := migrate.NewWithDatabaseInstance(
@@ -84,7 +84,7 @@ func GetMigrationVersion(db *sql.DB) (uint, bool, error) {
 		driver,
 	)
 	if err != nil {
-		return 0, false, fmt.Errorf("erreur lors de l'initialisation des migrations: %v", err)
+		return 0, false, fmt.Errorf("error initializing migrations: %v", err)
 	}
 
 	version, dirty, err := m.Version()

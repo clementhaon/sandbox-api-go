@@ -10,9 +10,9 @@ import (
 
 var DB *sql.DB
 
-// InitDB initialise la connexion à la base de données
+// InitDB initializes the database connection
 func InitDB() error {
-	// Récupération des variables d'environnement
+	// Load environment variables
 	dbHost := config.GetEnv("DB_HOST", "localhost")
 	dbPort := config.GetEnv("DB_PORT", "5432")
 	dbUser := config.GetEnv("DB_USER", "postgres")
@@ -20,37 +20,37 @@ func InitDB() error {
 	dbName := config.GetEnv("DB_NAME", "sandbox_api")
 	dbSSLMode := config.GetEnv("DB_SSLMODE", "disable")
 
-	// Construction de la chaîne de connexion
+	// Build the connection string
 	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
 		dbHost, dbPort, dbUser, dbPassword, dbName, dbSSLMode)
 
-	// Connexion à la base de données
+	// Connect to the database
 	var err error
 	DB, err = sql.Open("postgres", connStr)
 	if err != nil {
-		return fmt.Errorf("erreur lors de l'ouverture de la connexion: %v", err)
+		return fmt.Errorf("error opening database connection: %v", err)
 	}
 
-	// Test de la connexion
+	// Test the connection
 	if err = DB.Ping(); err != nil {
-		return fmt.Errorf("erreur lors du test de connexion: %v", err)
+		return fmt.Errorf("error testing database connection: %v", err)
 	}
 
-	// Configuration de la connexion
+	// Configure the connection pool
 	DB.SetMaxOpenConns(25)
 	DB.SetMaxIdleConns(25)
 
-	log.Println("✅ Connexion à PostgreSQL établie avec succès")
+	log.Println("✅ PostgreSQL connection established successfully")
 
-	// Exécuter les migrations automatiquement
+	// Run migrations automatically
 	if err := RunMigrations(DB); err != nil {
-		return fmt.Errorf("erreur lors de l'exécution des migrations: %v", err)
+		return fmt.Errorf("error running migrations: %v", err)
 	}
 
 	return nil
 }
 
-// CloseDB ferme la connexion à la base de données
+// CloseDB closes the database connection
 func CloseDB() error {
 	if DB != nil {
 		return DB.Close()

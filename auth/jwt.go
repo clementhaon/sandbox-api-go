@@ -9,7 +9,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// Récupération de la clé secrète JWT à partir des variables d'environnement
+// JWT secret key loaded from environment variables
 var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 
 // GenerateToken génère un token JWT pour un utilisateur
@@ -21,7 +21,7 @@ func GenerateToken(user models.User) (string, error) {
 		"exp":      time.Now().Add(time.Hour * 24).Unix(), // Expire dans 24h
 	}
 
-	// Ajouter les champs optionnels s'ils sont présents
+	// Add optional fields if present
 	if user.FirstName.Valid {
 		claims["first_name"] = user.FirstName.String
 	}
@@ -40,7 +40,7 @@ func GenerateToken(user models.User) (string, error) {
 func ValidateToken(tokenString string) (*models.Claims, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("méthode de signature inattendue: %v", token.Header["alg"])
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return jwtSecret, nil
 	})
@@ -60,7 +60,7 @@ func ValidateToken(tokenString string) (*models.Claims, error) {
 			ExpiresAt: time.Unix(exp, 0),
 		}
 
-		// Extraire les champs optionnels s'ils existent
+		// Extract optional fields if they exist
 		if role, ok := claims["role"].(string); ok {
 			result.Role = role
 		}
@@ -77,5 +77,5 @@ func ValidateToken(tokenString string) (*models.Claims, error) {
 		return result, nil
 	}
 
-	return nil, fmt.Errorf("token invalide")
+	return nil, fmt.Errorf("invalid token")
 }

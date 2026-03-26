@@ -42,15 +42,6 @@ func (v *Validator) GetError() *errors.AppError {
 	return errors.NewValidationError(v.errors)
 }
 
-// addError adds a validation error
-func (v *Validator) addError(field, message string, value interface{}) {
-	v.errors = append(v.errors, errors.ValidationError{
-		Field:   field,
-		Message: message,
-		Value:   value,
-	})
-}
-
 // ValidateField validates a field with multiple rules
 func (v *Validator) ValidateField(field string, value interface{}, rules ...ValidationRule) *Validator {
 	for _, rule := range rules {
