@@ -3,16 +3,16 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
-	"net/http"
 	"github.com/clementhaon/sandbox-api-go/auth"
 	"github.com/clementhaon/sandbox-api-go/database"
-	"github.com/clementhaon/sandbox-api-go/models"
 	"github.com/clementhaon/sandbox-api-go/errors"
 	"github.com/clementhaon/sandbox-api-go/logger"
 	"github.com/clementhaon/sandbox-api-go/metrics"
+	"github.com/clementhaon/sandbox-api-go/middleware"
+	"github.com/clementhaon/sandbox-api-go/models"
 	"github.com/clementhaon/sandbox-api-go/validation"
 	"golang.org/x/crypto/bcrypt"
-	"github.com/clementhaon/sandbox-api-go/middleware"
+	"net/http"
 	"time"
 )
 
@@ -42,7 +42,7 @@ func HandleRegister(w http.ResponseWriter, r *http.Request) error {
 	startTime := time.Now()
 	err := database.DB.QueryRow("SELECT id FROM users WHERE username = $1 OR email = $2", req.Username, req.Email).Scan(&existingUser.ID)
 	logger.LogDatabaseOperation(r.Context(), "SELECT", "users", time.Since(startTime), err)
-	
+
 	if err == nil {
 		return errors.NewUserExistsError()
 	} else if err != sql.ErrNoRows {
@@ -249,8 +249,7 @@ func HandleLogout(w http.ResponseWriter, r *http.Request) error {
 
 	json.NewEncoder(w).Encode(response)
 	return nil
-} 
-
+}
 
 func HandleGetUser(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set("Content-Type", "application/json")
@@ -272,7 +271,3 @@ func HandleGetUser(w http.ResponseWriter, r *http.Request) error {
 	json.NewEncoder(w).Encode(claims)
 	return nil
 }
-
-
-
-

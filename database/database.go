@@ -3,9 +3,9 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"github.com/clementhaon/sandbox-api-go/config"
 	_ "github.com/lib/pq"
+	"log"
 )
 
 var DB *sql.DB
@@ -57,4 +57,3 @@ func CloseDB() error {
 	}
 	return nil
 }
-

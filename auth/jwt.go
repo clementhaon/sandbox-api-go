@@ -2,8 +2,8 @@ package auth
 
 import (
 	"fmt"
-	"os"
 	"github.com/clementhaon/sandbox-api-go/models"
+	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"

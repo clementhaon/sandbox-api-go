@@ -24,20 +24,20 @@ const (
 
 // LogEntry represents a structured log entry
 type LogEntry struct {
-	Level       LogLevel               `json:"level"`
-	Message     string                 `json:"message"`
-	Timestamp   time.Time              `json:"timestamp"`
-	RequestID   string                 `json:"request_id,omitempty"`
-	UserID      int                    `json:"user_id,omitempty"`
-	Method      string                 `json:"method,omitempty"`
-	URL         string                 `json:"url,omitempty"`
-	StatusCode  int                    `json:"status_code,omitempty"`
-	Duration    time.Duration          `json:"duration,omitempty"`
-	Error       string                 `json:"error,omitempty"`
-	StackTrace  string                 `json:"stack_trace,omitempty"`
-	Fields      map[string]interface{} `json:"fields,omitempty"`
-	File        string                 `json:"file,omitempty"`
-	Function    string                 `json:"function,omitempty"`
+	Level      LogLevel               `json:"level"`
+	Message    string                 `json:"message"`
+	Timestamp  time.Time              `json:"timestamp"`
+	RequestID  string                 `json:"request_id,omitempty"`
+	UserID     int                    `json:"user_id,omitempty"`
+	Method     string                 `json:"method,omitempty"`
+	URL        string                 `json:"url,omitempty"`
+	StatusCode int                    `json:"status_code,omitempty"`
+	Duration   time.Duration          `json:"duration,omitempty"`
+	Error      string                 `json:"error,omitempty"`
+	StackTrace string                 `json:"stack_trace,omitempty"`
+	Fields     map[string]interface{} `json:"fields,omitempty"`
+	File       string                 `json:"file,omitempty"`
+	Function   string                 `json:"function,omitempty"`
 }
 
 // Logger represents the application logger
@@ -277,7 +277,7 @@ func LogHTTPRequest(ctx context.Context, method, url string, statusCode int, dur
 	if globalLogger == nil {
 		Initialize()
 	}
-	
+
 	entry := LogEntry{
 		Level:      INFO,
 		Message:    "HTTP Request",
@@ -322,7 +322,7 @@ func LogDatabaseOperation(ctx context.Context, operation, table string, duration
 
 	level := INFO
 	message := "Database operation completed"
-	
+
 	if err != nil {
 		level = ERROR
 		message = "Database operation failed"

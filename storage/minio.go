@@ -3,10 +3,10 @@ package storage
 import (
 	"context"
 	"fmt"
-	"net/url"
-	"path/filepath"
 	"github.com/clementhaon/sandbox-api-go/config"
 	"github.com/clementhaon/sandbox-api-go/logger"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -134,4 +134,3 @@ func GetObjectInfo(objectKey string) (*minio.ObjectInfo, error) {
 
 	return &objInfo, nil
 }
-

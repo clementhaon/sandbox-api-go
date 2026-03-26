@@ -2,11 +2,11 @@ package middleware
 
 import (
 	"context"
-	"net/http"
-	"runtime/debug"
 	"github.com/clementhaon/sandbox-api-go/errors"
 	"github.com/clementhaon/sandbox-api-go/logger"
 	"github.com/clementhaon/sandbox-api-go/metrics"
+	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 )
@@ -30,10 +30,10 @@ func ErrorMiddleware(handler ErrorHandler) http.HandlerFunc {
 
 		// Execute the handler
 		err := handler(w, r)
-		
+
 		// Calculate duration for metrics
 		duration := time.Since(startTime)
-		
+
 		if err != nil {
 			handleError(w, r, err, requestID)
 		}
@@ -47,7 +47,7 @@ func ErrorMiddleware(handler ErrorHandler) http.HandlerFunc {
 				statusCode = 500
 			}
 		}
-		
+
 		endpoint := normalizeEndpoint(r.URL.Path)
 		metrics.RecordHTTPRequest(r.Method, endpoint, statusCode, duration)
 	}
@@ -56,15 +56,15 @@ func ErrorMiddleware(handler ErrorHandler) http.HandlerFunc {
 // handleError processes and responds to errors
 func handleError(w http.ResponseWriter, r *http.Request, err error, requestID string) {
 	ctx := r.Context()
-	
+
 	// Check if it's already an AppError
 	if appErr, ok := errors.IsAppError(err); ok {
 		// Add request ID to the error
 		appErr.WithRequestID(requestID)
-		
+
 		// Record error metrics
 		metrics.RecordError(string(appErr.Type), string(appErr.Code))
-		
+
 		// Log the error with appropriate level
 		if appErr.Type == errors.ErrorTypeServer {
 			logger.ErrorContext(ctx, "Server error occurred", err, map[string]interface{}{
@@ -78,7 +78,7 @@ func handleError(w http.ResponseWriter, r *http.Request, err error, requestID st
 				"message":     appErr.Message,
 			})
 		}
-		
+
 		// Write the structured error response
 		errors.WriteError(w, appErr)
 		return
@@ -137,7 +137,7 @@ func PanicRecoveryMiddleware(next http.Handler) http.Handler {
 func RequestLoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		startTime := time.Now()
-		
+
 		// Create a response writer wrapper to capture status code
 		wrapper := &responseWriterWrapper{
 			ResponseWriter: w,
@@ -157,14 +157,14 @@ func RequestLoggingMiddleware(next http.Handler) http.Handler {
 		// Set request ID header
 		wrapper.Header().Set("X-Request-ID", requestID)
 
-	// Execute next handler
-	next.ServeHTTP(wrapper, r)
+		// Execute next handler
+		next.ServeHTTP(wrapper, r)
 
-	// Log the completed request (skip metrics endpoint to reduce noise)
-	if r.URL.Path != "/metrics" {
-		duration := time.Since(startTime)
-		logger.LogHTTPRequest(r.Context(), r.Method, r.URL.Path, wrapper.statusCode, duration)
-	}
+		// Log the completed request (skip metrics endpoint to reduce noise)
+		if r.URL.Path != "/metrics" {
+			duration := time.Since(startTime)
+			logger.LogHTTPRequest(r.Context(), r.Method, r.URL.Path, wrapper.statusCode, duration)
+		}
 	})
 }
 

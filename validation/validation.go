@@ -2,11 +2,11 @@ package validation
 
 import (
 	"fmt"
+	"github.com/clementhaon/sandbox-api-go/errors"
 	"net/mail"
 	"regexp"
 	"strings"
 	"unicode"
-	"github.com/clementhaon/sandbox-api-go/errors"
 )
 
 // ValidationRule represents a validation rule
@@ -75,7 +75,7 @@ func Required() ValidationRule {
 				Message: "This field is required",
 			}
 		}
-		
+
 		switch v := value.(type) {
 		case string:
 			if strings.TrimSpace(v) == "" {
@@ -90,7 +90,7 @@ func Required() ValidationRule {
 				}
 			}
 		}
-		
+
 		return nil
 	}
 }
@@ -104,13 +104,13 @@ func MinLength(min int) ValidationRule {
 				Message: "Value must be a string",
 			}
 		}
-		
+
 		if len(strings.TrimSpace(str)) < min {
 			return &errors.ValidationError{
 				Message: fmt.Sprintf("Must be at least %d characters long", min),
 			}
 		}
-		
+
 		return nil
 	}
 }
@@ -124,13 +124,13 @@ func MaxLength(max int) ValidationRule {
 				Message: "Value must be a string",
 			}
 		}
-		
+
 		if len(str) > max {
 			return &errors.ValidationError{
 				Message: fmt.Sprintf("Must be no more than %d characters long", max),
 			}
 		}
-		
+
 		return nil
 	}
 }
@@ -144,19 +144,19 @@ func Email() ValidationRule {
 				Message: "Value must be a string",
 			}
 		}
-		
+
 		str = strings.TrimSpace(str)
 		if str == "" {
 			return nil // Let Required() handle empty values
 		}
-		
+
 		_, err := mail.ParseAddress(str)
 		if err != nil {
 			return &errors.ValidationError{
 				Message: "Must be a valid email address",
 			}
 		}
-		
+
 		return nil
 	}
 }
@@ -170,26 +170,26 @@ func Username() ValidationRule {
 				Message: "Value must be a string",
 			}
 		}
-		
+
 		str = strings.TrimSpace(str)
 		if str == "" {
 			return nil // Let Required() handle empty values
 		}
-		
+
 		// Username rules: 3-30 chars, alphanumeric and underscore, must start with letter
 		if len(str) < 3 || len(str) > 30 {
 			return &errors.ValidationError{
 				Message: "Username must be between 3 and 30 characters",
 			}
 		}
-		
+
 		// Must start with a letter
 		if !unicode.IsLetter(rune(str[0])) {
 			return &errors.ValidationError{
 				Message: "Username must start with a letter",
 			}
 		}
-		
+
 		// Only letters, numbers, and underscores
 		validUsername := regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]*$`)
 		if !validUsername.MatchString(str) {
@@ -197,7 +197,7 @@ func Username() ValidationRule {
 				Message: "Username can only contain letters, numbers, and underscores",
 			}
 		}
-		
+
 		return nil
 	}
 }
@@ -211,24 +211,24 @@ func Password() ValidationRule {
 				Message: "Value must be a string",
 			}
 		}
-		
+
 		if str == "" {
 			return nil // Let Required() handle empty values
 		}
-		
+
 		// Password strength rules
 		if len(str) < 8 {
 			return &errors.ValidationError{
 				Message: "Password must be at least 8 characters long",
 			}
 		}
-		
+
 		if len(str) > 128 {
 			return &errors.ValidationError{
 				Message: "Password must be no more than 128 characters long",
 			}
 		}
-		
+
 		var hasUpper, hasLower, hasNumber bool
 		for _, char := range str {
 			switch {
@@ -240,25 +240,25 @@ func Password() ValidationRule {
 				hasNumber = true
 			}
 		}
-		
+
 		if !hasUpper {
 			return &errors.ValidationError{
 				Message: "Password must contain at least one uppercase letter",
 			}
 		}
-		
+
 		if !hasLower {
 			return &errors.ValidationError{
 				Message: "Password must contain at least one lowercase letter",
 			}
 		}
-		
+
 		if !hasNumber {
 			return &errors.ValidationError{
 				Message: "Password must contain at least one number",
 			}
 		}
-		
+
 		return nil
 	}
 }
@@ -272,13 +272,13 @@ func NotEmpty() ValidationRule {
 				Message: "Value must be a string",
 			}
 		}
-		
+
 		if strings.TrimSpace(str) == "" {
 			return &errors.ValidationError{
 				Message: "This field cannot be empty",
 			}
 		}
-		
+
 		return nil
 	}
 }
@@ -300,13 +300,13 @@ func Range(min, max int) ValidationRule {
 				Message: "Value must be a number",
 			}
 		}
-		
+
 		if num < min || num > max {
 			return &errors.ValidationError{
 				Message: fmt.Sprintf("Value must be between %d and %d", min, max),
 			}
 		}
-		
+
 		return nil
 	}
 }
@@ -319,7 +319,7 @@ func OneOf(allowed ...interface{}) ValidationRule {
 				return nil
 			}
 		}
-		
+
 		return &errors.ValidationError{
 			Message: fmt.Sprintf("Value must be one of: %v", allowed),
 		}
@@ -331,30 +331,30 @@ func OneOf(allowed ...interface{}) ValidationRule {
 // ValidateRegisterRequest validates user registration input
 func ValidateRegisterRequest(username, email, password string) *errors.AppError {
 	validator := NewValidator()
-	
+
 	validator.ValidateField("username", username, Required(), Username())
 	validator.ValidateField("email", email, Required(), Email())
 	validator.ValidateField("password", password, Required(), Password())
-	
+
 	return validator.GetError()
 }
 
 // ValidateLoginRequest validates user login input
 func ValidateLoginRequest(email, password string) *errors.AppError {
 	validator := NewValidator()
-	
+
 	validator.ValidateField("email", email, Required(), Email())
 	validator.ValidateField("password", password, Required())
-	
+
 	return validator.GetError()
 }
 
 // ValidateTaskInput validates task creation/update input
 func ValidateTaskInput(title, description string) *errors.AppError {
 	validator := NewValidator()
-	
+
 	validator.ValidateField("title", title, Required(), NotEmpty(), MaxLength(200))
 	validator.ValidateField("description", description, MaxLength(1000))
-	
+
 	return validator.GetError()
 }

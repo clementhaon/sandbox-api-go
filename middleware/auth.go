@@ -2,10 +2,10 @@ package middleware
 
 import (
 	"context"
-	"net/http"
 	"github.com/clementhaon/sandbox-api-go/auth"
 	"github.com/clementhaon/sandbox-api-go/errors"
 	"github.com/clementhaon/sandbox-api-go/logger"
+	"net/http"
 	"strings"
 )
 
@@ -54,7 +54,7 @@ func AuthMiddleware(handler ErrorHandler) http.HandlerFunc {
 		// Ajouter les informations utilisateur au contexte
 		ctx := context.WithValue(r.Context(), UserContextKey, claims)
 		ctx = context.WithValue(ctx, logger.UserIDKey, claims.UserID)
-		
+
 		return handler(w, r.WithContext(ctx))
 	})
-} 
+}
