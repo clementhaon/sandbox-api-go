@@ -1,21 +1,27 @@
 package handlers
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/clementhaon/sandbox-api-go/database"
-	"github.com/clementhaon/sandbox-api-go/errors"
-	"github.com/clementhaon/sandbox-api-go/logger"
-	"github.com/clementhaon/sandbox-api-go/middleware"
-	"github.com/clementhaon/sandbox-api-go/models"
-	"github.com/clementhaon/sandbox-api-go/storage"
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/clementhaon/sandbox-api-go/errors"
+	"github.com/clementhaon/sandbox-api-go/middleware"
+	"github.com/clementhaon/sandbox-api-go/models"
+	"github.com/clementhaon/sandbox-api-go/services"
 )
 
-func HandleGetPresignedUploadURL(w http.ResponseWriter, r *http.Request) error {
+type MediaHandler struct {
+	mediaService services.MediaService
+}
+
+func NewMediaHandler(s services.MediaService) *MediaHandler {
+	return &MediaHandler{mediaService: s}
+}
+
+func (h *MediaHandler) HandleGetPresignedUploadURL(w http.ResponseWriter, r *http.Request) error {
 	if r.Method != http.MethodPost {
 		return errors.NewMethodNotAllowedError()
 	}
@@ -30,24 +36,9 @@ func HandleGetPresignedUploadURL(w http.ResponseWriter, r *http.Request) error {
 		return errors.NewInvalidJSONError()
 	}
 
-	if req.Filename == "" {
-		return errors.NewMissingFieldError("Filename is required")
-	}
-
-	if req.MimeType == "" {
-		return errors.NewMissingFieldError("MIME type is required")
-	}
-
-	uploadURL, objectKey, err := storage.GeneratePresignedUploadURL(req.Filename, req.MimeType, claims.UserID)
+	response, err := h.mediaService.GetPresignedUploadURL(r.Context(), claims.UserID, req.Filename, req.MimeType)
 	if err != nil {
-		logger.Error("Failed to generate presigned upload URL", err)
-		return errors.NewInternalError()
-	}
-
-	response := models.PresignedUploadURLResponse{
-		UploadURL: uploadURL,
-		ObjectKey: objectKey,
-		ExpiresIn: 604800, // 7 days in seconds (7 * 24 * 60 * 60)
+		return err
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -56,7 +47,7 @@ func HandleGetPresignedUploadURL(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func HandleConfirmUpload(w http.ResponseWriter, r *http.Request) error {
+func (h *MediaHandler) HandleConfirmUpload(w http.ResponseWriter, r *http.Request) error {
 	if r.Method != http.MethodPost {
 		return errors.NewMethodNotAllowedError()
 	}
@@ -77,43 +68,9 @@ func HandleConfirmUpload(w http.ResponseWriter, r *http.Request) error {
 		return errors.NewBadRequestError("Invalid request body")
 	}
 
-	if req.ObjectKey == "" || req.OriginalFilename == "" || req.MimeType == "" || req.BucketName == "" {
-		return errors.NewBadRequestError("Missing required fields")
-	}
-
-	objInfo, err := storage.GetObjectInfo(req.ObjectKey)
+	media, err := h.mediaService.ConfirmUpload(r.Context(), claims.UserID, req.ObjectKey, req.OriginalFilename, req.MimeType, req.BucketName)
 	if err != nil {
-		logger.Error("Failed to get object info", err)
-		return errors.NewBadRequestError("Object not found or upload incomplete")
-	}
-
-	query := `
-		INSERT INTO media (user_id, object_key, bucket_name, original_filename, file_size, mime_type, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
-		RETURNING id, created_at, updated_at
-	`
-
-	var media models.Media
-	media.UserID = claims.UserID
-	media.ObjectKey = req.ObjectKey
-	media.BucketName = req.BucketName
-	media.OriginalFilename = req.OriginalFilename
-	media.FileSize = objInfo.Size
-	media.MimeType = req.MimeType
-
-	err = database.DB.QueryRow(
-		query,
-		media.UserID,
-		media.ObjectKey,
-		media.BucketName,
-		media.OriginalFilename,
-		media.FileSize,
-		media.MimeType,
-	).Scan(&media.ID, &media.CreatedAt, &media.UpdatedAt)
-
-	if err != nil {
-		logger.Error("Failed to save media record", err)
-		return errors.NewInternalServerError("Failed to save media record")
+		return err
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -122,7 +79,7 @@ func HandleConfirmUpload(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func HandleGetUserMedia(w http.ResponseWriter, r *http.Request) error {
+func (h *MediaHandler) HandleGetUserMedia(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set("Content-Type", "application/json")
 
 	if r.Method != http.MethodGet {
@@ -130,15 +87,12 @@ func HandleGetUserMedia(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	claims, ok := r.Context().Value(middleware.UserContextKey).(*models.Claims)
-
 	if !ok {
-		logger.ErrorContext(r.Context(), "Missing user context in authenticated request", nil)
 		return errors.NewInternalError().WithDetails(map[string]interface{}{
 			"issue": "user_context_missing",
 		})
 	}
 
-	// Get page from query parameters (default: 1)
 	page := 1
 	if pageParam := r.URL.Query().Get("page"); pageParam != "" {
 		if p, err := strconv.Atoi(pageParam); err == nil && p > 0 {
@@ -146,81 +100,9 @@ func HandleGetUserMedia(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
-	// Fixed limit of 50 items per page
-	limit := 50
-	offset := (page - 1) * limit
-
-	// Count total media for this user
-	var totalCount int
-	countQuery := `SELECT COUNT(*) FROM media WHERE user_id = $1`
-	err := database.DB.QueryRow(countQuery, claims.UserID).Scan(&totalCount)
+	response, err := h.mediaService.ListUserMedia(r.Context(), claims.UserID, page)
 	if err != nil {
-		logger.Error("Failed to count media", err)
-		return errors.NewInternalServerError("Failed to retrieve media count")
-	}
-
-	// Calculate total number of pages
-	totalPages := (totalCount + limit - 1) / limit
-	if totalPages == 0 {
-		totalPages = 1
-	}
-
-	// Fetch media with pagination
-	query := `
-		SELECT id, user_id, object_key, bucket_name, original_filename, file_size, mime_type, created_at, updated_at
-		FROM media
-		WHERE user_id = $1
-		ORDER BY created_at DESC
-		LIMIT $2 OFFSET $3
-	`
-
-	rows, err := database.DB.Query(query, claims.UserID, limit, offset)
-	if err != nil {
-		logger.Error("Failed to query media", err)
-		return errors.NewInternalServerError("Failed to retrieve media")
-	}
-	defer rows.Close()
-
-	var mediaList []models.Media
-	for rows.Next() {
-		var media models.Media
-		err := rows.Scan(
-			&media.ID,
-			&media.UserID,
-			&media.ObjectKey,
-			&media.BucketName,
-			&media.OriginalFilename,
-			&media.FileSize,
-			&media.MimeType,
-			&media.CreatedAt,
-			&media.UpdatedAt,
-		)
-		if err != nil {
-			logger.Error("Failed to scan media row", err)
-			continue
-		}
-		// Generate a presigned URL to access the file
-		presignedURL, err := storage.GeneratePresignedDownloadURL(media.ObjectKey)
-		if err != nil {
-			logger.Error("Failed to generate presigned URL for media", err)
-			// On error, set an empty URL or skip this entry
-			media.URL = ""
-		} else {
-			media.URL = presignedURL
-		}
-		mediaList = append(mediaList, media)
-	}
-
-	if mediaList == nil {
-		mediaList = []models.Media{}
-	}
-
-	response := models.MediaListResponse{
-		Media:      mediaList,
-		Page:       page,
-		Limit:      limit,
-		TotalCount: totalCount,
-		TotalPages: totalPages,
+		return err
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -228,7 +110,7 @@ func HandleGetUserMedia(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func HandleGetMediaByID(w http.ResponseWriter, r *http.Request) error {
+func (h *MediaHandler) HandleGetMediaByID(w http.ResponseWriter, r *http.Request) error {
 	if r.Method != http.MethodGet {
 		return errors.NewMethodNotAllowedError()
 	}
@@ -248,40 +130,9 @@ func HandleGetMediaByID(w http.ResponseWriter, r *http.Request) error {
 		return errors.NewBadRequestError("Invalid media ID")
 	}
 
-	var media models.Media
-	query := `
-		SELECT id, user_id, object_key, bucket_name, original_filename, file_size, mime_type, created_at, updated_at
-		FROM media
-		WHERE id = $1 AND user_id = $2
-	`
-
-	err = database.DB.QueryRow(query, mediaID, claims.UserID).Scan(
-		&media.ID,
-		&media.UserID,
-		&media.ObjectKey,
-		&media.BucketName,
-		&media.OriginalFilename,
-		&media.FileSize,
-		&media.MimeType,
-		&media.CreatedAt,
-		&media.UpdatedAt,
-	)
-
-	if err == sql.ErrNoRows {
-		return errors.NewNotFoundError("Media")
-	}
+	media, err := h.mediaService.GetByID(r.Context(), claims.UserID, mediaID)
 	if err != nil {
-		logger.Error("Failed to query media", err)
-		return errors.NewInternalServerError("Failed to retrieve media")
-	}
-
-	// Generate a presigned URL to access the file
-	presignedURL, err := storage.GeneratePresignedDownloadURL(media.ObjectKey)
-	if err != nil {
-		logger.Error("Failed to generate presigned URL for media", err)
-		media.URL = ""
-	} else {
-		media.URL = presignedURL
+		return err
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -290,7 +141,7 @@ func HandleGetMediaByID(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func HandleGetPresignedDownloadURL(w http.ResponseWriter, r *http.Request) error {
+func (h *MediaHandler) HandleGetPresignedDownloadURL(w http.ResponseWriter, r *http.Request) error {
 	if r.Method != http.MethodGet {
 		return errors.NewMethodNotAllowedError()
 	}
@@ -310,27 +161,9 @@ func HandleGetPresignedDownloadURL(w http.ResponseWriter, r *http.Request) error
 		return errors.NewBadRequestError("Invalid media ID")
 	}
 
-	var objectKey string
-	query := `SELECT object_key FROM media WHERE id = $1 AND user_id = $2`
-	err = database.DB.QueryRow(query, mediaID, claims.UserID).Scan(&objectKey)
-
-	if err == sql.ErrNoRows {
-		return errors.NewNotFoundError("Media")
-	}
+	response, err := h.mediaService.GetPresignedDownloadURL(r.Context(), claims.UserID, mediaID)
 	if err != nil {
-		logger.Error("Failed to query media", err)
-		return errors.NewInternalServerError("Failed to retrieve media")
-	}
-
-	downloadURL, err := storage.GeneratePresignedDownloadURL(objectKey)
-	if err != nil {
-		logger.Error("Failed to generate presigned download URL", err)
-		return errors.NewInternalServerError("Failed to generate download URL")
-	}
-
-	response := models.PresignedDownloadURLResponse{
-		DownloadURL: downloadURL,
-		ExpiresIn:   604800, // 7 days in seconds (7 * 24 * 60 * 60)
+		return err
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -339,7 +172,7 @@ func HandleGetPresignedDownloadURL(w http.ResponseWriter, r *http.Request) error
 	return nil
 }
 
-func HandleDeleteMedia(w http.ResponseWriter, r *http.Request) error {
+func (h *MediaHandler) HandleDeleteMedia(w http.ResponseWriter, r *http.Request) error {
 	if r.Method != http.MethodDelete {
 		return errors.NewMethodNotAllowedError()
 	}
@@ -359,27 +192,8 @@ func HandleDeleteMedia(w http.ResponseWriter, r *http.Request) error {
 		return errors.NewBadRequestError("Invalid media ID")
 	}
 
-	var objectKey string
-	query := `SELECT object_key FROM media WHERE id = $1 AND user_id = $2`
-	err = database.DB.QueryRow(query, mediaID, claims.UserID).Scan(&objectKey)
-
-	if err == sql.ErrNoRows {
-		return errors.NewNotFoundError("Media")
-	}
-	if err != nil {
-		logger.Error("Failed to query media", err)
-		return errors.NewInternalServerError("Failed to retrieve media")
-	}
-
-	if err := storage.DeleteObject(objectKey); err != nil {
-		logger.Error("Failed to delete object from MinIO", err)
-	}
-
-	deleteQuery := `DELETE FROM media WHERE id = $1 AND user_id = $2`
-	_, err = database.DB.Exec(deleteQuery, mediaID, claims.UserID)
-	if err != nil {
-		logger.Error("Failed to delete media record", err)
-		return errors.NewInternalServerError("Failed to delete media")
+	if err := h.mediaService.Delete(r.Context(), claims.UserID, mediaID); err != nil {
+		return err
 	}
 
 	w.Header().Set("Content-Type", "application/json")

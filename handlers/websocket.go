@@ -21,16 +21,21 @@ var upgrader = ws.Upgrader{
 	},
 }
 
-// HandleWebSocket handles WebSocket connections at /ws
-func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// Get token from query parameter
+type WebSocketHandler struct {
+	wsManager *websocket.Manager
+}
+
+func NewWebSocketHandler(wsManager *websocket.Manager) *WebSocketHandler {
+	return &WebSocketHandler{wsManager: wsManager}
+}
+
+func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if token == "" {
 		http.Error(w, "Missing token", http.StatusUnauthorized)
 		return
 	}
 
-	// Validate JWT token
 	claims, err := auth.ValidateToken(token)
 	if err != nil {
 		logger.Warn("WebSocket: Invalid token", map[string]interface{}{
@@ -40,14 +45,12 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Upgrade HTTP connection to WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logger.Error("WebSocket: Failed to upgrade connection", err)
 		return
 	}
 
-	// Create client
 	client := &websocket.Client{
 		ID:     uuid.New().String(),
 		UserID: claims.UserID,
@@ -55,15 +58,13 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		Send:   make(chan []byte, 256),
 	}
 
-	// Register client
-	websocket.GlobalManager.Register(client)
+	h.wsManager.Register(client)
 
 	logger.Info("WebSocket: Client connected", map[string]interface{}{
 		"client_id": client.ID,
 		"user_id":   client.UserID,
 	})
 
-	// Start goroutines for reading and writing
 	go client.WritePump()
-	go client.ReadPump(websocket.GlobalManager)
+	go client.ReadPump(h.wsManager)
 }
