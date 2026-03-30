@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -143,9 +144,9 @@ func formatFile(file string, line int) string {
 	// Get just the filename, not the full path
 	parts := strings.Split(file, "/")
 	if len(parts) > 0 {
-		return parts[len(parts)-1] + ":" + string(rune(line+'0'))
+		return parts[len(parts)-1] + ":" + strconv.Itoa(line)
 	}
-	return file + ":" + string(rune(line+'0'))
+	return file + ":" + strconv.Itoa(line)
 }
 
 // Debug logs a debug message

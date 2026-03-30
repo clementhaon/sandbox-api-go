@@ -22,10 +22,6 @@ func NewAuthHandler(s services.AuthService) *AuthHandler {
 func (h *AuthHandler) HandleRegister(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set("Content-Type", "application/json")
 
-	if r.Method != http.MethodPost {
-		return errors.NewMethodNotAllowedError()
-	}
-
 	var req models.RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		logger.WarnContext(r.Context(), "Invalid JSON in register request", map[string]interface{}{
@@ -39,19 +35,18 @@ func (h *AuthHandler) HandleRegister(w http.ResponseWriter, r *http.Request) err
 		return err
 	}
 
-	// Create the secure HTTPOnly cookie
 	http.SetCookie(w, &http.Cookie{
 		Name:     "auth_token",
 		Value:    token,
 		Path:     "/",
-		MaxAge:   24 * 60 * 60, // 24 hours in seconds
-		HttpOnly: true,         // Prevents access via JavaScript
-		Secure:   false,        // Set to true in production with HTTPS
+		MaxAge:   24 * 60 * 60,
+		HttpOnly: true,
+		Secure:   false,
 		SameSite: http.SameSiteStrictMode,
 	})
 
 	response := models.AuthResponse{
-		Token:   "", // Token removed from JSON response
+		Token:   "",
 		User:    user,
 		Message: "Registration successful",
 	}
@@ -63,10 +58,6 @@ func (h *AuthHandler) HandleRegister(w http.ResponseWriter, r *http.Request) err
 
 func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set("Content-Type", "application/json")
-
-	if r.Method != http.MethodPost {
-		return errors.NewMethodNotAllowedError()
-	}
 
 	var req models.LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -81,19 +72,18 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 
-	// Create the secure HTTPOnly cookie
 	http.SetCookie(w, &http.Cookie{
 		Name:     "auth_token",
 		Value:    token,
 		Path:     "/",
-		MaxAge:   24 * 60 * 60, // 24 hours in seconds
-		HttpOnly: true,         // Prevents access via JavaScript
-		Secure:   false,        // Set to true in production with HTTPS
+		MaxAge:   24 * 60 * 60,
+		HttpOnly: true,
+		Secure:   false,
 		SameSite: http.SameSiteStrictMode,
 	})
 
 	response := models.AuthResponse{
-		Token:   "", // Token removed from JSON response
+		Token:   "",
 		User:    user,
 		Message: "Login successful",
 	}
@@ -105,18 +95,13 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) error 
 func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set("Content-Type", "application/json")
 
-	if r.Method != http.MethodPost {
-		return errors.NewMethodNotAllowedError()
-	}
-
 	logger.InfoContext(r.Context(), "User logout requested")
 
-	// Delete the cookie by setting MaxAge to -1
 	http.SetCookie(w, &http.Cookie{
 		Name:     "auth_token",
 		Value:    "",
 		Path:     "/",
-		MaxAge:   -1, // Deletes the cookie
+		MaxAge:   -1,
 		HttpOnly: true,
 		Secure:   false,
 		SameSite: http.SameSiteStrictMode,
@@ -130,10 +115,6 @@ func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) error
 
 func (h *AuthHandler) HandleGetUser(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set("Content-Type", "application/json")
-
-	if r.Method != http.MethodGet {
-		return errors.NewMethodNotAllowedError()
-	}
 
 	claims, ok := r.Context().Value(middleware.UserContextKey).(*models.Claims)
 	if !ok {

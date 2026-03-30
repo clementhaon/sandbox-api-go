@@ -15,18 +15,18 @@ var upgrader = ws.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		// Allow all origins in development
 		// TODO: Restrict in production
 		return true
 	},
 }
 
 type WebSocketHandler struct {
-	wsManager *websocket.Manager
+	wsManager  *websocket.Manager
+	jwtManager *auth.JWTManager
 }
 
-func NewWebSocketHandler(wsManager *websocket.Manager) *WebSocketHandler {
-	return &WebSocketHandler{wsManager: wsManager}
+func NewWebSocketHandler(wsManager *websocket.Manager, jwtManager *auth.JWTManager) *WebSocketHandler {
+	return &WebSocketHandler{wsManager: wsManager, jwtManager: jwtManager}
 }
 
 func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -36,7 +36,7 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	claims, err := auth.ValidateToken(token)
+	claims, err := h.jwtManager.ValidateToken(token)
 	if err != nil {
 		logger.Warn("WebSocket: Invalid token", map[string]interface{}{
 			"error": err.Error(),

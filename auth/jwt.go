@@ -2,26 +2,34 @@ package auth
 
 import (
 	"fmt"
-	"github.com/clementhaon/sandbox-api-go/models"
-	"os"
 	"time"
 
+	"github.com/clementhaon/sandbox-api-go/models"
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// JWT secret key loaded from environment variables
-var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
+// JWTManager handles JWT token generation and validation
+type JWTManager struct {
+	secret []byte
+}
 
-// GenerateToken génère un token JWT pour un utilisateur
-func GenerateToken(user models.User) (string, error) {
+// NewJWTManager creates a new JWTManager with the given secret
+func NewJWTManager(secret string) (*JWTManager, error) {
+	if len(secret) < 16 {
+		return nil, fmt.Errorf("JWT secret must be at least 16 characters long")
+	}
+	return &JWTManager{secret: []byte(secret)}, nil
+}
+
+// GenerateToken generates a JWT token for a user
+func (m *JWTManager) GenerateToken(user models.User) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id":  user.ID,
 		"username": user.Username,
 		"role":     user.Role,
-		"exp":      time.Now().Add(time.Hour * 24).Unix(), // Expire dans 24h
+		"exp":      time.Now().Add(24 * time.Hour).Unix(),
 	}
 
-	// Add optional fields if present
 	if user.FirstName.Valid {
 		claims["first_name"] = user.FirstName.String
 	}
@@ -33,16 +41,16 @@ func GenerateToken(user models.User) (string, error) {
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(jwtSecret)
+	return token.SignedString(m.secret)
 }
 
-// ValidateToken valide un token JWT et retourne les claims
-func ValidateToken(tokenString string) (*models.Claims, error) {
+// ValidateToken validates a JWT token and returns the claims
+func (m *JWTManager) ValidateToken(tokenString string) (*models.Claims, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return jwtSecret, nil
+		return m.secret, nil
 	})
 
 	if err != nil {
@@ -60,7 +68,6 @@ func ValidateToken(tokenString string) (*models.Claims, error) {
 			ExpiresAt: time.Unix(exp, 0),
 		}
 
-		// Extract optional fields if they exist
 		if role, ok := claims["role"].(string); ok {
 			result.Role = role
 		}

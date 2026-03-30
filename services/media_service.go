@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"database/sql"
+
 	"github.com/clementhaon/sandbox-api-go/errors"
 	"github.com/clementhaon/sandbox-api-go/logger"
 	"github.com/clementhaon/sandbox-api-go/models"
@@ -19,11 +20,12 @@ type MediaService interface {
 }
 
 type mediaService struct {
-	db *sql.DB
+	db      *sql.DB
+	storage *storage.Storage
 }
 
-func NewMediaService(db *sql.DB) MediaService {
-	return &mediaService{db: db}
+func NewMediaService(db *sql.DB, storage *storage.Storage) MediaService {
+	return &mediaService{db: db, storage: storage}
 }
 
 func (s *mediaService) GetPresignedUploadURL(ctx context.Context, userID int, filename, mimeType string) (models.PresignedUploadURLResponse, error) {
@@ -34,7 +36,7 @@ func (s *mediaService) GetPresignedUploadURL(ctx context.Context, userID int, fi
 		return models.PresignedUploadURLResponse{}, errors.NewMissingFieldError("MIME type is required")
 	}
 
-	uploadURL, objectKey, err := storage.GeneratePresignedUploadURL(filename, mimeType, userID)
+	uploadURL, objectKey, err := s.storage.GeneratePresignedUploadURL(filename, mimeType, userID)
 	if err != nil {
 		logger.Error("Failed to generate presigned upload URL", err)
 		return models.PresignedUploadURLResponse{}, errors.NewInternalError()
@@ -52,7 +54,7 @@ func (s *mediaService) ConfirmUpload(ctx context.Context, userID int, objectKey,
 		return models.Media{}, errors.NewBadRequestError("Missing required fields")
 	}
 
-	objInfo, err := storage.GetObjectInfo(objectKey)
+	objInfo, err := s.storage.GetObjectInfo(objectKey)
 	if err != nil {
 		logger.Error("Failed to get object info", err)
 		return models.Media{}, errors.NewBadRequestError("Object not found or upload incomplete")
@@ -130,7 +132,7 @@ func (s *mediaService) ListUserMedia(ctx context.Context, userID int, page int) 
 			logger.Error("Failed to scan media row", err)
 			continue
 		}
-		presignedURL, err := storage.GeneratePresignedDownloadURL(media.ObjectKey)
+		presignedURL, err := s.storage.GeneratePresignedDownloadURL(media.ObjectKey)
 		if err != nil {
 			logger.Error("Failed to generate presigned URL for media", err)
 			media.URL = ""
@@ -173,7 +175,7 @@ func (s *mediaService) GetByID(ctx context.Context, userID int, mediaID int) (mo
 		return models.Media{}, errors.NewInternalServerError("Failed to retrieve media")
 	}
 
-	presignedURL, err := storage.GeneratePresignedDownloadURL(media.ObjectKey)
+	presignedURL, err := s.storage.GeneratePresignedDownloadURL(media.ObjectKey)
 	if err != nil {
 		logger.Error("Failed to generate presigned URL for media", err)
 		media.URL = ""
@@ -196,7 +198,7 @@ func (s *mediaService) GetPresignedDownloadURL(ctx context.Context, userID int, 
 		return models.PresignedDownloadURLResponse{}, errors.NewInternalServerError("Failed to retrieve media")
 	}
 
-	downloadURL, err := storage.GeneratePresignedDownloadURL(objectKey)
+	downloadURL, err := s.storage.GeneratePresignedDownloadURL(objectKey)
 	if err != nil {
 		logger.Error("Failed to generate presigned download URL", err)
 		return models.PresignedDownloadURLResponse{}, errors.NewInternalServerError("Failed to generate download URL")
@@ -220,7 +222,7 @@ func (s *mediaService) Delete(ctx context.Context, userID int, mediaID int) erro
 		return errors.NewInternalServerError("Failed to retrieve media")
 	}
 
-	if err := storage.DeleteObject(objectKey); err != nil {
+	if err := s.storage.DeleteObject(objectKey); err != nil {
 		logger.Error("Failed to delete object from MinIO", err)
 	}
 

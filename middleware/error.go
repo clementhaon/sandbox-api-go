@@ -2,13 +2,16 @@ package middleware
 
 import (
 	"context"
-	"github.com/clementhaon/sandbox-api-go/errors"
-	"github.com/clementhaon/sandbox-api-go/logger"
-	"github.com/clementhaon/sandbox-api-go/metrics"
+	"crypto/rand"
+	"encoding/hex"
 	"net/http"
 	"runtime/debug"
 	"strings"
 	"time"
+
+	"github.com/clementhaon/sandbox-api-go/errors"
+	"github.com/clementhaon/sandbox-api-go/logger"
+	"github.com/clementhaon/sandbox-api-go/metrics"
 )
 
 // ErrorHandler is a custom handler type that can return errors
@@ -179,20 +182,11 @@ func (w *responseWriterWrapper) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
-// generateRequestID generates a unique request ID
+// generateRequestID generates a unique request ID using crypto/rand.
 func generateRequestID() string {
-	// Simple implementation - in production you might want to use UUID
-	return time.Now().Format("20060102150405") + "-" + randomString(6)
-}
-
-// randomString generates a random string of given length
-func randomString(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = charset[time.Now().UnixNano()%int64(len(charset))]
-	}
-	return string(b)
+	b := make([]byte, 8)
+	rand.Read(b)
+	return time.Now().Format("20060102150405") + "-" + hex.EncodeToString(b)
 }
 
 // normalizeEndpoint normalizes URL paths for metrics (replace IDs with {id})

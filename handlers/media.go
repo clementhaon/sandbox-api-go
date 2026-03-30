@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/clementhaon/sandbox-api-go/errors"
 	"github.com/clementhaon/sandbox-api-go/middleware"
@@ -22,10 +21,6 @@ func NewMediaHandler(s services.MediaService) *MediaHandler {
 }
 
 func (h *MediaHandler) HandleGetPresignedUploadURL(w http.ResponseWriter, r *http.Request) error {
-	if r.Method != http.MethodPost {
-		return errors.NewMethodNotAllowedError()
-	}
-
 	claims, ok := r.Context().Value(middleware.UserContextKey).(*models.Claims)
 	if !ok {
 		return errors.NewAuthRequiredError()
@@ -42,16 +37,11 @@ func (h *MediaHandler) HandleGetPresignedUploadURL(w http.ResponseWriter, r *htt
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
 	return nil
 }
 
 func (h *MediaHandler) HandleConfirmUpload(w http.ResponseWriter, r *http.Request) error {
-	if r.Method != http.MethodPost {
-		return errors.NewMethodNotAllowedError()
-	}
-
 	claims, ok := r.Context().Value(middleware.UserContextKey).(*models.Claims)
 	if !ok {
 		return errors.NewInvalidTokenError()
@@ -82,10 +72,6 @@ func (h *MediaHandler) HandleConfirmUpload(w http.ResponseWriter, r *http.Reques
 func (h *MediaHandler) HandleGetUserMedia(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set("Content-Type", "application/json")
 
-	if r.Method != http.MethodGet {
-		return errors.NewMethodNotAllowedError()
-	}
-
 	claims, ok := r.Context().Value(middleware.UserContextKey).(*models.Claims)
 	if !ok {
 		return errors.NewInternalError().WithDetails(map[string]interface{}{
@@ -105,27 +91,17 @@ func (h *MediaHandler) HandleGetUserMedia(w http.ResponseWriter, r *http.Request
 		return err
 	}
 
-	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
 	return nil
 }
 
 func (h *MediaHandler) HandleGetMediaByID(w http.ResponseWriter, r *http.Request) error {
-	if r.Method != http.MethodGet {
-		return errors.NewMethodNotAllowedError()
-	}
-
 	claims, ok := r.Context().Value(middleware.UserContextKey).(*models.Claims)
 	if !ok {
 		return errors.NewUnauthorizedError("User ID not found in context")
 	}
 
-	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(pathParts) < 2 {
-		return errors.NewBadRequestError("Invalid media ID")
-	}
-
-	mediaID, err := strconv.Atoi(pathParts[len(pathParts)-1])
+	mediaID, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
 		return errors.NewBadRequestError("Invalid media ID")
 	}
@@ -136,27 +112,17 @@ func (h *MediaHandler) HandleGetMediaByID(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(media)
 	return nil
 }
 
 func (h *MediaHandler) HandleGetPresignedDownloadURL(w http.ResponseWriter, r *http.Request) error {
-	if r.Method != http.MethodGet {
-		return errors.NewMethodNotAllowedError()
-	}
-
 	claims, ok := r.Context().Value(middleware.UserContextKey).(*models.Claims)
 	if !ok {
 		return errors.NewUnauthorizedError("User ID not found in context")
 	}
 
-	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(pathParts) < 3 {
-		return errors.NewBadRequestError("Invalid media ID")
-	}
-
-	mediaID, err := strconv.Atoi(pathParts[len(pathParts)-2])
+	mediaID, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
 		return errors.NewBadRequestError("Invalid media ID")
 	}
@@ -167,27 +133,17 @@ func (h *MediaHandler) HandleGetPresignedDownloadURL(w http.ResponseWriter, r *h
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
 	return nil
 }
 
 func (h *MediaHandler) HandleDeleteMedia(w http.ResponseWriter, r *http.Request) error {
-	if r.Method != http.MethodDelete {
-		return errors.NewMethodNotAllowedError()
-	}
-
 	claims, ok := r.Context().Value(middleware.UserContextKey).(*models.Claims)
 	if !ok {
 		return errors.NewUnauthorizedError("User ID not found in context")
 	}
 
-	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(pathParts) < 2 {
-		return errors.NewBadRequestError("Invalid media ID")
-	}
-
-	mediaID, err := strconv.Atoi(pathParts[len(pathParts)-1])
+	mediaID, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
 		return errors.NewBadRequestError("Invalid media ID")
 	}
@@ -197,7 +153,6 @@ func (h *MediaHandler) HandleDeleteMedia(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
 		"message": fmt.Sprintf("Media %d deleted successfully", mediaID),
 	})

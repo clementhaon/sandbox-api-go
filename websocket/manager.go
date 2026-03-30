@@ -30,22 +30,15 @@ type Manager struct {
 	mu         sync.RWMutex
 }
 
-// Global manager instance
-var GlobalManager *Manager
-
-// NewManager creates a new WebSocket manager
+// NewManager creates a new WebSocket manager and starts its run loop.
 func NewManager() *Manager {
-	return &Manager{
+	m := &Manager{
 		clients:    make(map[int][]*Client),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 	}
-}
-
-// Init initializes the global manager
-func Init() {
-	GlobalManager = NewManager()
-	go GlobalManager.Run()
+	go m.Run()
+	return m
 }
 
 // Run starts the manager's main loop

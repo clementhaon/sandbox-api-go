@@ -21,11 +21,12 @@ type AuthService interface {
 }
 
 type authService struct {
-	db *sql.DB
+	db         *sql.DB
+	jwtManager *auth.JWTManager
 }
 
-func NewAuthService(db *sql.DB) AuthService {
-	return &authService{db: db}
+func NewAuthService(db *sql.DB, jwtManager *auth.JWTManager) AuthService {
+	return &authService{db: db, jwtManager: jwtManager}
 }
 
 func (s *authService) Register(ctx context.Context, req models.RegisterRequest) (models.User, string, error) {
@@ -67,7 +68,7 @@ func (s *authService) Register(ctx context.Context, req models.RegisterRequest) 
 		return models.User{}, "", errors.NewDatabaseError().WithCause(err)
 	}
 
-	token, err := auth.GenerateToken(newUser)
+	token, err := s.jwtManager.GenerateToken(newUser)
 	if err != nil {
 		logger.ErrorContext(ctx, "Error generating JWT token", err)
 		return models.User{}, "", errors.NewInternalError().WithCause(err)
@@ -127,7 +128,7 @@ func (s *authService) Login(ctx context.Context, req models.LoginRequest) (model
 		})
 	}
 
-	token, err := auth.GenerateToken(foundUser)
+	token, err := s.jwtManager.GenerateToken(foundUser)
 	if err != nil {
 		logger.ErrorContext(ctx, "Error generating JWT token for login", err)
 		return models.User{}, "", errors.NewInternalError().WithCause(err)

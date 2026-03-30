@@ -22,10 +22,6 @@ func NewProfileHandler(s services.ProfileService) *ProfileHandler {
 func (h *ProfileHandler) HandleGetProfile(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set("Content-Type", "application/json")
 
-	if r.Method != http.MethodGet {
-		return errors.NewMethodNotAllowedError()
-	}
-
 	claims, ok := r.Context().Value(middleware.UserContextKey).(*models.Claims)
 	if !ok {
 		logger.ErrorContext(r.Context(), "Missing user context in authenticated request", nil)
@@ -45,10 +41,6 @@ func (h *ProfileHandler) HandleGetProfile(w http.ResponseWriter, r *http.Request
 
 func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set("Content-Type", "application/json")
-
-	if r.Method != http.MethodPut {
-		return errors.NewMethodNotAllowedError()
-	}
 
 	claims, ok := r.Context().Value(middleware.UserContextKey).(*models.Claims)
 	if !ok {
