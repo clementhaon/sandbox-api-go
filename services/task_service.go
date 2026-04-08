@@ -9,6 +9,7 @@ import (
 	"github.com/clementhaon/sandbox-api-go/errors"
 	"github.com/clementhaon/sandbox-api-go/logger"
 	"github.com/clementhaon/sandbox-api-go/models"
+	"github.com/clementhaon/sandbox-api-go/validation"
 
 	"github.com/lib/pq"
 )
@@ -211,8 +212,8 @@ func (s *taskService) GetByID(ctx context.Context, id int) (models.Task, error) 
 }
 
 func (s *taskService) Create(ctx context.Context, userID int, req models.CreateTaskRequest) (models.Task, error) {
-	if req.Title == "" {
-		return models.Task{}, errors.NewBadRequestError("Title is required")
+	if err := validation.ValidateTaskInput(req.Title, req.Description); err != nil {
+		return models.Task{}, err
 	}
 	if req.ColumnID == 0 {
 		return models.Task{}, errors.NewBadRequestError("ColumnID is required")
@@ -234,11 +235,22 @@ func (s *taskService) Create(ctx context.Context, userID int, req models.CreateT
 	}
 
 	var t models.TaskDB
+	var assigneeID sql.NullInt64
+	var assigneeUsername, assigneeAvatarURL sql.NullString
+
 	startTime = time.Now()
 	err = s.db.QueryRow(`
-		INSERT INTO tasks (title, description, column_id, "order", priority, assignee_id, deadline, estimated_time, tags, created_by, user_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
-		RETURNING id, title, description, column_id, "order", priority, assignee_id, deadline, estimated_time, tracked_time, tags, created_by, user_id, created_at, updated_at
+		WITH inserted AS (
+			INSERT INTO tasks (title, description, column_id, "order", priority, assignee_id, deadline, estimated_time, tags, created_by, user_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
+			RETURNING *
+		)
+		SELECT i.id, i.title, i.description, i.column_id, i."order", i.priority,
+			i.assignee_id, i.deadline, i.estimated_time, i.tracked_time, i.tags,
+			i.created_by, i.user_id, i.created_at, i.updated_at,
+			u.id, u.username, u.avatar_url
+		FROM inserted i
+		LEFT JOIN users u ON i.assignee_id = u.id
 	`,
 		req.Title, req.Description, req.ColumnID, maxOrder+1, req.Priority,
 		req.AssigneeID, req.Deadline, req.EstimatedTime, pq.Array(req.Tags), userID,
@@ -246,6 +258,7 @@ func (s *taskService) Create(ctx context.Context, userID int, req models.CreateT
 		&t.ID, &t.Title, &t.Description, &t.ColumnID, &t.Order, &t.Priority,
 		&t.AssigneeID, &t.Deadline, &t.EstimatedTime, &t.TrackedTime, &t.Tags,
 		&t.CreatedBy, &t.UserID, &t.CreatedAt, &t.UpdatedAt,
+		&assigneeID, &assigneeUsername, &assigneeAvatarURL,
 	)
 	logger.LogDatabaseOperation(ctx, "INSERT", "tasks", time.Since(startTime), err)
 
@@ -255,7 +268,15 @@ func (s *taskService) Create(ctx context.Context, userID int, req models.CreateT
 	}
 
 	task := t.ToTask()
-	task.Assignee = s.fetchAssignee(t)
+	if assigneeID.Valid {
+		task.Assignee = &models.UserBrief{
+			ID:       int(assigneeID.Int64),
+			Username: assigneeUsername.String,
+		}
+		if assigneeAvatarURL.Valid {
+			task.Assignee.AvatarURL = assigneeAvatarURL.String
+		}
+	}
 
 	logger.InfoContext(ctx, "Task created", map[string]interface{}{
 		"task_id":   task.ID,
@@ -280,20 +301,31 @@ func (s *taskService) Update(ctx context.Context, id int, req models.UpdateTaskR
 	}
 
 	var t models.TaskDB
+	var assigneeID sql.NullInt64
+	var assigneeUsername, assigneeAvatarURL sql.NullString
+
 	startTime = time.Now()
 	err = s.db.QueryRow(`
-		UPDATE tasks SET
-			title = COALESCE(NULLIF($1, ''), title),
-			description = COALESCE($2, description),
-			column_id = CASE WHEN $3 > 0 THEN $3 ELSE column_id END,
-			priority = COALESCE(NULLIF($4, ''), priority),
-			assignee_id = $5,
-			deadline = $6,
-			estimated_time = CASE WHEN $7 > 0 THEN $7 ELSE estimated_time END,
-			tags = COALESCE($8, tags),
-			updated_at = NOW()
-		WHERE id = $9
-		RETURNING id, title, description, column_id, "order", priority, assignee_id, deadline, estimated_time, tracked_time, tags, created_by, user_id, created_at, updated_at
+		WITH updated AS (
+			UPDATE tasks SET
+				title = COALESCE(NULLIF($1, ''), title),
+				description = COALESCE($2, description),
+				column_id = CASE WHEN $3 > 0 THEN $3 ELSE column_id END,
+				priority = COALESCE(NULLIF($4, ''), priority),
+				assignee_id = $5,
+				deadline = $6,
+				estimated_time = CASE WHEN $7 > 0 THEN $7 ELSE estimated_time END,
+				tags = COALESCE($8, tags),
+				updated_at = NOW()
+			WHERE id = $9
+			RETURNING *
+		)
+		SELECT u2.id, u2.title, u2.description, u2.column_id, u2."order", u2.priority,
+			u2.assignee_id, u2.deadline, u2.estimated_time, u2.tracked_time, u2.tags,
+			u2.created_by, u2.user_id, u2.created_at, u2.updated_at,
+			usr.id, usr.username, usr.avatar_url
+		FROM updated u2
+		LEFT JOIN users usr ON u2.assignee_id = usr.id
 	`,
 		req.Title, req.Description, req.ColumnID, req.Priority,
 		req.AssigneeID, req.Deadline, req.EstimatedTime, pq.Array(req.Tags), id,
@@ -301,6 +333,7 @@ func (s *taskService) Update(ctx context.Context, id int, req models.UpdateTaskR
 		&t.ID, &t.Title, &t.Description, &t.ColumnID, &t.Order, &t.Priority,
 		&t.AssigneeID, &t.Deadline, &t.EstimatedTime, &t.TrackedTime, &t.Tags,
 		&t.CreatedBy, &t.UserID, &t.CreatedAt, &t.UpdatedAt,
+		&assigneeID, &assigneeUsername, &assigneeAvatarURL,
 	)
 	logger.LogDatabaseOperation(ctx, "UPDATE", "tasks", time.Since(startTime), err)
 
@@ -310,7 +343,15 @@ func (s *taskService) Update(ctx context.Context, id int, req models.UpdateTaskR
 	}
 
 	task := t.ToTask()
-	task.Assignee = s.fetchAssignee(t)
+	if assigneeID.Valid {
+		task.Assignee = &models.UserBrief{
+			ID:       int(assigneeID.Int64),
+			Username: assigneeUsername.String,
+		}
+		if assigneeAvatarURL.Valid {
+			task.Assignee.AvatarURL = assigneeAvatarURL.String
+		}
+	}
 
 	return task, nil
 }
@@ -343,9 +384,16 @@ func (s *taskService) Move(ctx context.Context, id int, req models.MoveTaskReque
 }
 
 func (s *taskService) Reorder(ctx context.Context, columnID int, taskIDs []int) ([]models.Task, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		logger.ErrorContext(ctx, "Error starting transaction for reorder", err)
+		return nil, errors.NewDatabaseError().WithCause(err)
+	}
+	defer tx.Rollback()
+
 	for i, taskID := range taskIDs {
 		startTime := time.Now()
-		result, err := s.db.Exec(`UPDATE tasks SET "order" = $1, updated_at = NOW() WHERE id = $2 AND column_id = $3`, i, taskID, columnID)
+		result, err := tx.ExecContext(ctx, `UPDATE tasks SET "order" = $1, updated_at = NOW() WHERE id = $2 AND column_id = $3`, i, taskID, columnID)
 		logger.LogDatabaseOperation(ctx, "UPDATE", "tasks", time.Since(startTime), err)
 
 		if err != nil {
@@ -357,6 +405,11 @@ func (s *taskService) Reorder(ctx context.Context, columnID int, taskIDs []int) 
 		if rowsAffected == 0 {
 			return nil, errors.NewNotFoundError("Task not found in column: " + strconv.Itoa(taskID))
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		logger.ErrorContext(ctx, "Error committing reorder transaction", err)
+		return nil, errors.NewDatabaseError().WithCause(err)
 	}
 
 	return s.List(ctx, &columnID)

@@ -93,7 +93,7 @@ func (s *authService) Login(ctx context.Context, req models.LoginRequest) (model
 	startTime := time.Now()
 	err := s.db.QueryRow(
 		`SELECT id, username, email, password, first_name, last_name, avatar_url, is_active, last_login_at, role, created_at, updated_at
-		FROM users WHERE Email = $1`,
+		FROM users WHERE email = $1`,
 		req.Email,
 	).Scan(&foundUser.ID, &foundUser.Username, &foundUser.Email, &hashedPassword, &foundUser.FirstName,
 		&foundUser.LastName, &foundUser.AvatarURL, &foundUser.IsActive, &foundUser.LastLoginAt,

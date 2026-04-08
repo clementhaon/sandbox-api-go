@@ -4,9 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"net/http"
+	"regexp"
 	"runtime/debug"
-	"strings"
 	"time"
 
 	"github.com/clementhaon/sandbox-api-go/errors"
@@ -185,15 +186,17 @@ func (w *responseWriterWrapper) WriteHeader(code int) {
 // generateRequestID generates a unique request ID using crypto/rand.
 func generateRequestID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to time-based ID if crypto/rand fails
+		fallback := time.Now().UnixNano()
+		return fmt.Sprintf("%s-%x", time.Now().Format("20060102150405"), fallback)
+	}
 	return time.Now().Format("20060102150405") + "-" + hex.EncodeToString(b)
 }
 
+var numericSegmentRe = regexp.MustCompile(`/\d+`)
+
 // normalizeEndpoint normalizes URL paths for metrics (replace IDs with {id})
 func normalizeEndpoint(path string) string {
-	// Replace task IDs with {id} for consistent metrics
-	if strings.HasPrefix(path, "/api/tasks/") && len(path) > 11 {
-		return "/api/tasks/{id}"
-	}
-	return path
+	return numericSegmentRe.ReplaceAllString(path, "/{id}")
 }

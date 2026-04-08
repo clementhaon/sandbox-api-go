@@ -42,7 +42,10 @@ func main() {
 	db := database.DB
 
 	// Initialize JWT manager
-	jwtSecret := config.GetEnv("JWT_SECRET", "default-secret-change-me-in-prod")
+	jwtSecret, err := config.RequireEnv("JWT_SECRET")
+	if err != nil {
+		logger.Fatal("JWT_SECRET environment variable is required", err)
+	}
 	jwtManager, err := auth.NewJWTManager(jwtSecret)
 	if err != nil {
 		logger.Fatal("Failed to initialize JWT manager", fmt.Errorf("%s", err.Error()))
@@ -88,11 +91,17 @@ func main() {
 	mediaHandler := handlers.NewMediaHandler(mediaSvc)
 	wsHandler := handlers.NewWebSocketHandler(wsManager, jwtManager)
 
+	// Initialize rate limiter for auth routes
+	rateLimiter := middleware.NewRateLimiter(10, time.Minute)
+
 	// Create the HTTP server with error handling middleware
-	mux := createMux(authMW, authHandler, userHandler, profileHandler, columnHandler, taskHandler, timeEntryHandler, notificationHandler, mediaHandler, wsHandler)
+	mux := createMux(authMW, rateLimiter, authHandler, userHandler, profileHandler, columnHandler, taskHandler, timeEntryHandler, notificationHandler, mediaHandler, wsHandler)
 	server := &http.Server{
-		Addr:    ":8080",
-		Handler: middleware.PanicRecoveryMiddleware(middleware.RequestLoggingMiddleware(mux)),
+		Addr:         ":8080",
+		Handler:      middleware.PanicRecoveryMiddleware(middleware.RequestLoggingMiddleware(mux)),
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	// Start the server in a goroutine
@@ -124,6 +133,7 @@ func main() {
 
 func createMux(
 	authMW func(middleware.ErrorHandler) http.HandlerFunc,
+	rateLimiter *middleware.RateLimiter,
 	authHandler *handlers.AuthHandler,
 	userHandler *handlers.UserHandler,
 	profileHandler *handlers.ProfileHandler,
@@ -138,8 +148,8 @@ func createMux(
 
 	// Public routes (no authentication required)
 	mux.HandleFunc("/", middleware.ErrorMiddleware(handleHome))
-	mux.HandleFunc("POST /auth/register", middleware.ErrorMiddleware(authHandler.HandleRegister))
-	mux.HandleFunc("POST /auth/login", middleware.ErrorMiddleware(authHandler.HandleLogin))
+	mux.HandleFunc("POST /auth/register", rateLimiter.Limit(middleware.ErrorMiddleware(authHandler.HandleRegister)))
+	mux.HandleFunc("POST /auth/login", rateLimiter.Limit(middleware.ErrorMiddleware(authHandler.HandleLogin)))
 	mux.HandleFunc("POST /auth/logout", middleware.ErrorMiddleware(authHandler.HandleLogout))
 
 	// Prometheus metrics endpoint

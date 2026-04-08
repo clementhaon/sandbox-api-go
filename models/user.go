@@ -44,7 +44,6 @@ type UpdateProfileRequest struct {
 
 // AuthResponse represents the response after authentication
 type AuthResponse struct {
-	Token   string `json:"token"`
 	User    User   `json:"user"`
 	Message string `json:"message"`
 }

@@ -3,6 +3,8 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"time"
+
 	"github.com/clementhaon/sandbox-api-go/config"
 	_ "github.com/lib/pq"
 	"log"
@@ -39,6 +41,8 @@ func InitDB() error {
 	// Configure the connection pool
 	DB.SetMaxOpenConns(25)
 	DB.SetMaxIdleConns(25)
+	DB.SetConnMaxLifetime(5 * time.Minute)
+	DB.SetConnMaxIdleTime(1 * time.Minute)
 
 	log.Println("✅ PostgreSQL connection established successfully")
 

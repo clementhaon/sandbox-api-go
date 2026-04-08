@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 
 	"github.com/clementhaon/sandbox-api-go/errors"
 	"github.com/clementhaon/sandbox-api-go/logger"
@@ -41,12 +42,11 @@ func (h *AuthHandler) HandleRegister(w http.ResponseWriter, r *http.Request) err
 		Path:     "/",
 		MaxAge:   24 * 60 * 60,
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   os.Getenv("APP_ENV") == "production",
 		SameSite: http.SameSiteStrictMode,
 	})
 
 	response := models.AuthResponse{
-		Token:   "",
 		User:    user,
 		Message: "Registration successful",
 	}
@@ -78,12 +78,11 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) error 
 		Path:     "/",
 		MaxAge:   24 * 60 * 60,
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   os.Getenv("APP_ENV") == "production",
 		SameSite: http.SameSiteStrictMode,
 	})
 
 	response := models.AuthResponse{
-		Token:   "",
 		User:    user,
 		Message: "Login successful",
 	}
@@ -103,7 +102,7 @@ func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) error
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   os.Getenv("APP_ENV") == "production",
 		SameSite: http.SameSiteStrictMode,
 	})
 

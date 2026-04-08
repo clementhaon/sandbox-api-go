@@ -34,6 +34,9 @@ const (
 	ErrDatabase           ErrorCode = "DATABASE_ERROR"
 	ErrServiceUnavailable ErrorCode = "SERVICE_UNAVAILABLE"
 
+	// Rate limiting errors
+	ErrTooManyRequests ErrorCode = "TOO_MANY_REQUESTS"
+
 	// Method errors
 	ErrMethodNotAllowed ErrorCode = "METHOD_NOT_ALLOWED"
 )
@@ -189,6 +192,11 @@ func NewDatabaseError() *AppError {
 
 func NewServiceUnavailableError() *AppError {
 	return NewAppError(ErrServiceUnavailable, "Service temporarily unavailable", http.StatusServiceUnavailable, ErrorTypeServer)
+}
+
+// Rate Limiting Errors
+func NewTooManyRequestsError() *AppError {
+	return NewAppError(ErrTooManyRequests, "Too many requests, please try again later", http.StatusTooManyRequests, ErrorTypeClient)
 }
 
 // Method Errors
