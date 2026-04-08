@@ -1,0 +1,9 @@
+go 1.26.1
+
+use (
+	./pkg
+	./services/user-service
+	./services/board-service
+	./services/notification-service
+	./services/media-service
+)

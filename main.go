@@ -35,11 +35,11 @@ func main() {
 	metrics.InitAppInfo("2.0.0", "dev", time.Now().Format("2006-01-02"), runtime.Version())
 
 	// Initialize the database
-	if err := database.InitDB(); err != nil {
+	db, err := database.InitDB()
+	if err != nil {
 		logger.Fatal("Failed to initialize database", err)
 	}
-	defer database.CloseDB()
-	db := database.DB
+	defer db.Close()
 
 	// Initialize JWT manager
 	jwtSecret := config.GetEnv("JWT_SECRET", "default-secret-change-me-in-prod")

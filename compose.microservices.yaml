@@ -1,0 +1,181 @@
+services:
+  # ============================================================
+  # Microservices
+  # ============================================================
+
+  user-service:
+    build:
+      context: .
+      dockerfile: services/user-service/Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      - DB_HOST=${DB_HOST:-postgres}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres123}
+      - DB_NAME=${DB_NAME:-sandbox_api}
+      - DB_SSLMODE=${DB_SSLMODE:-disable}
+      - JWT_SECRET=${JWT_SECRET:-default-secret-change-me-in-prod}
+    networks:
+      - app-network
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    labels:
+      - "logging=promtail"
+
+  board-service:
+    build:
+      context: .
+      dockerfile: services/board-service/Dockerfile
+    ports:
+      - "8082:8082"
+    environment:
+      - DB_HOST=${DB_HOST:-postgres}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres123}
+      - DB_NAME=${DB_NAME:-sandbox_api}
+      - DB_SSLMODE=${DB_SSLMODE:-disable}
+      - JWT_SECRET=${JWT_SECRET:-default-secret-change-me-in-prod}
+      - USER_SERVICE_URL=http://user-service:8081
+    networks:
+      - app-network
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - user-service
+    labels:
+      - "logging=promtail"
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    ports:
+      - "8083:8083"
+    environment:
+      - DB_HOST=${DB_HOST:-postgres}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres123}
+      - DB_NAME=${DB_NAME:-sandbox_api}
+      - DB_SSLMODE=${DB_SSLMODE:-disable}
+      - JWT_SECRET=${JWT_SECRET:-default-secret-change-me-in-prod}
+    networks:
+      - app-network
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    labels:
+      - "logging=promtail"
+
+  media-service:
+    build:
+      context: .
+      dockerfile: services/media-service/Dockerfile
+    ports:
+      - "8084:8084"
+    environment:
+      - DB_HOST=${DB_HOST:-postgres}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres123}
+      - DB_NAME=${DB_NAME:-sandbox_api}
+      - DB_SSLMODE=${DB_SSLMODE:-disable}
+      - JWT_SECRET=${JWT_SECRET:-default-secret-change-me-in-prod}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin123}
+      - MINIO_BUCKET=${MINIO_BUCKET:-user-uploads}
+      - MINIO_USE_SSL=${MINIO_USE_SSL:-false}
+    networks:
+      - app-network
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - minio
+    labels:
+      - "logging=promtail"
+
+  # ============================================================
+  # Infrastructure
+  # ============================================================
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-sandbox_api}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres123}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin123}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # ============================================================
+  # Monitoring (optional profile)
+  # docker compose -f compose.microservices.yaml --profile monitoring up -d
+  # ============================================================
+
+  prometheus:
+    profiles: [monitoring]
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  grafana:
+    profiles: [monitoring]
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+    networks:
+      - app-network
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_data:
+  minio_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  app-network:
+    driver: bridge

@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS time_entries;
+DROP TABLE IF EXISTS tasks;
+DROP TABLE IF EXISTS columns;

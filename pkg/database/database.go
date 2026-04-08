@@ -3,12 +3,13 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"github.com/clementhaon/sandbox-api-go/config"
-	_ "github.com/lib/pq"
 	"log"
+
+	"github.com/clementhaon/sandbox-api-go/pkg/config"
+	_ "github.com/lib/pq"
 )
 
-// InitDB initializes the database connection and returns it.
+// InitDB creates and returns a database connection using environment variables.
 func InitDB() (*sql.DB, error) {
 	dbHost := config.GetEnv("DB_HOST", "localhost")
 	dbPort := config.GetEnv("DB_PORT", "5432")
@@ -22,21 +23,23 @@ func InitDB() (*sql.DB, error) {
 
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
-		return nil, fmt.Errorf("error opening database connection: %w", err)
+		return nil, fmt.Errorf("error opening database connection: %v", err)
 	}
 
 	if err = db.Ping(); err != nil {
-		return nil, fmt.Errorf("error testing database connection: %w", err)
+		return nil, fmt.Errorf("error testing database connection: %v", err)
 	}
 
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(25)
 
 	log.Println("PostgreSQL connection established successfully")
-
-	if err := RunMigrations(db); err != nil {
-		return nil, fmt.Errorf("error running migrations: %w", err)
-	}
-
 	return db, nil
+}
+
+// RunMigrations runs database migrations from the given path.
+func RunMigrations(db *sql.DB, migrationsPath string) error {
+	// Import is handled by the caller since migrate requires file:// source
+	// This is a placeholder — each service runs its own migrations in main.go
+	return nil
 }
