@@ -2,14 +2,13 @@ package services
 
 import (
 	"context"
-	"database/sql"
-	"time"
 
 	"github.com/clementhaon/sandbox-api-go/auth"
 	"github.com/clementhaon/sandbox-api-go/errors"
 	"github.com/clementhaon/sandbox-api-go/logger"
 	"github.com/clementhaon/sandbox-api-go/metrics"
 	"github.com/clementhaon/sandbox-api-go/models"
+	"github.com/clementhaon/sandbox-api-go/repository"
 	"github.com/clementhaon/sandbox-api-go/validation"
 
 	"golang.org/x/crypto/bcrypt"
@@ -21,12 +20,12 @@ type AuthService interface {
 }
 
 type authService struct {
-	db         *sql.DB
+	userRepo   repository.UserRepository
 	jwtManager *auth.JWTManager
 }
 
-func NewAuthService(db *sql.DB, jwtManager *auth.JWTManager) AuthService {
-	return &authService{db: db, jwtManager: jwtManager}
+func NewAuthService(userRepo repository.UserRepository, jwtManager *auth.JWTManager) AuthService {
+	return &authService{userRepo: userRepo, jwtManager: jwtManager}
 }
 
 func (s *authService) Register(ctx context.Context, req models.RegisterRequest) (models.User, string, error) {
@@ -34,16 +33,12 @@ func (s *authService) Register(ctx context.Context, req models.RegisterRequest) 
 		return models.User{}, "", validationErr
 	}
 
-	var existingUser models.User
-	startTime := time.Now()
-	err := s.db.QueryRow("SELECT id FROM users WHERE username = $1 OR email = $2", req.Username, req.Email).Scan(&existingUser.ID)
-	logger.LogDatabaseOperation(ctx, "SELECT", "users", time.Since(startTime), err)
-
-	if err == nil {
+	exists, err := s.userRepo.ExistsByUsernameOrEmail(ctx, req.Username, req.Email)
+	if err != nil {
+		return models.User{}, "", err
+	}
+	if exists {
 		return models.User{}, "", errors.NewUserExistsError()
-	} else if err != sql.ErrNoRows {
-		logger.ErrorContext(ctx, "Database error checking existing user", err)
-		return models.User{}, "", errors.NewDatabaseError().WithCause(err)
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -52,20 +47,9 @@ func (s *authService) Register(ctx context.Context, req models.RegisterRequest) 
 		return models.User{}, "", errors.NewInternalError().WithCause(err)
 	}
 
-	var newUser models.User
-	startTime = time.Now()
-	err = s.db.QueryRow(
-		`INSERT INTO users (username, email, password, is_active, role)
-		VALUES ($1, $2, $3, true, 'user')
-		RETURNING id, username, email, first_name, last_name, avatar_url, is_active, last_login_at, role, created_at, updated_at`,
-		req.Username, req.Email, string(hashedPassword),
-	).Scan(&newUser.ID, &newUser.Username, &newUser.Email, &newUser.FirstName, &newUser.LastName,
-		&newUser.AvatarURL, &newUser.IsActive, &newUser.LastLoginAt, &newUser.Role, &newUser.CreatedAt, &newUser.UpdatedAt)
-	logger.LogDatabaseOperation(ctx, "INSERT", "users", time.Since(startTime), err)
-
+	newUser, err := s.userRepo.CreateAuth(ctx, req.Username, req.Email, string(hashedPassword))
 	if err != nil {
-		logger.ErrorContext(ctx, "Error creating user", err)
-		return models.User{}, "", errors.NewDatabaseError().WithCause(err)
+		return models.User{}, "", err
 	}
 
 	token, err := s.jwtManager.GenerateToken(newUser)
@@ -88,26 +72,14 @@ func (s *authService) Login(ctx context.Context, req models.LoginRequest) (model
 		return models.User{}, "", validationErr
 	}
 
-	var foundUser models.User
-	var hashedPassword string
-	startTime := time.Now()
-	err := s.db.QueryRow(
-		`SELECT id, username, email, password, first_name, last_name, avatar_url, is_active, last_login_at, role, created_at, updated_at
-		FROM users WHERE email = $1`,
-		req.Email,
-	).Scan(&foundUser.ID, &foundUser.Username, &foundUser.Email, &hashedPassword, &foundUser.FirstName,
-		&foundUser.LastName, &foundUser.AvatarURL, &foundUser.IsActive, &foundUser.LastLoginAt,
-		&foundUser.Role, &foundUser.CreatedAt, &foundUser.UpdatedAt)
-	logger.LogDatabaseOperation(ctx, "SELECT", "users", time.Since(startTime), err)
-
-	if err == sql.ErrNoRows {
-		logger.WarnContext(ctx, "Login attempt with non-existent email", map[string]interface{}{
-			"email": req.Email,
-		})
-		return models.User{}, "", errors.NewInvalidCredentialsError()
-	} else if err != nil {
-		logger.ErrorContext(ctx, "Database error during login", err)
-		return models.User{}, "", errors.NewDatabaseError().WithCause(err)
+	foundUser, hashedPassword, err := s.userRepo.FindByEmailWithPassword(ctx, req.Email)
+	if err != nil {
+		if _, ok := errors.IsAppError(err); ok {
+			logger.WarnContext(ctx, "Login attempt with non-existent email", map[string]interface{}{
+				"email": req.Email,
+			})
+		}
+		return models.User{}, "", err
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(req.Password)); err != nil {
@@ -118,10 +90,7 @@ func (s *authService) Login(ctx context.Context, req models.LoginRequest) (model
 		return models.User{}, "", errors.NewInvalidCredentialsError()
 	}
 
-	startTime = time.Now()
-	_, err = s.db.Exec("UPDATE users SET last_login_at = NOW() WHERE id = $1", foundUser.ID)
-	logger.LogDatabaseOperation(ctx, "UPDATE", "users", time.Since(startTime), err)
-	if err != nil {
+	if err := s.userRepo.UpdateLastLogin(ctx, foundUser.ID); err != nil {
 		logger.WarnContext(ctx, "Failed to update last_login_at", map[string]interface{}{
 			"user_id": foundUser.ID,
 			"error":   err.Error(),
