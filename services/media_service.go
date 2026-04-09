@@ -2,11 +2,11 @@ package services
 
 import (
 	"context"
-	"database/sql"
 
 	"github.com/clementhaon/sandbox-api-go/errors"
 	"github.com/clementhaon/sandbox-api-go/logger"
 	"github.com/clementhaon/sandbox-api-go/models"
+	"github.com/clementhaon/sandbox-api-go/repository"
 	"github.com/clementhaon/sandbox-api-go/storage"
 )
 
@@ -20,12 +20,12 @@ type MediaService interface {
 }
 
 type mediaService struct {
-	db      *sql.DB
-	storage *storage.Storage
+	mediaRepo repository.MediaRepository
+	storage   *storage.Storage
 }
 
-func NewMediaService(db *sql.DB, storage *storage.Storage) MediaService {
-	return &mediaService{db: db, storage: storage}
+func NewMediaService(mediaRepo repository.MediaRepository, storage *storage.Storage) MediaService {
+	return &mediaService{mediaRepo: mediaRepo, storage: storage}
 }
 
 func (s *mediaService) GetPresignedUploadURL(ctx context.Context, userID int, filename, mimeType string) (models.PresignedUploadURLResponse, error) {
@@ -45,7 +45,7 @@ func (s *mediaService) GetPresignedUploadURL(ctx context.Context, userID int, fi
 	return models.PresignedUploadURLResponse{
 		UploadURL: uploadURL,
 		ObjectKey: objectKey,
-		ExpiresIn: 604800, // 7 days in seconds
+		ExpiresIn: 604800,
 	}, nil
 }
 
@@ -60,32 +60,7 @@ func (s *mediaService) ConfirmUpload(ctx context.Context, userID int, objectKey,
 		return models.Media{}, errors.NewBadRequestError("Object not found or upload incomplete")
 	}
 
-	query := `
-		INSERT INTO media (user_id, object_key, bucket_name, original_filename, file_size, mime_type, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
-		RETURNING id, created_at, updated_at
-	`
-
-	var media models.Media
-	media.UserID = userID
-	media.ObjectKey = objectKey
-	media.BucketName = bucketName
-	media.OriginalFilename = originalFilename
-	media.FileSize = objInfo.Size
-	media.MimeType = mimeType
-
-	err = s.db.QueryRow(
-		query,
-		media.UserID, media.ObjectKey, media.BucketName,
-		media.OriginalFilename, media.FileSize, media.MimeType,
-	).Scan(&media.ID, &media.CreatedAt, &media.UpdatedAt)
-
-	if err != nil {
-		logger.Error("Failed to save media record", err)
-		return models.Media{}, errors.NewInternalServerError("Failed to save media record")
-	}
-
-	return media, nil
+	return s.mediaRepo.Create(ctx, userID, objectKey, bucketName, originalFilename, mimeType, objInfo.Size)
 }
 
 func (s *mediaService) ListUserMedia(ctx context.Context, userID int, page int) (models.MediaListResponse, error) {
@@ -95,11 +70,9 @@ func (s *mediaService) ListUserMedia(ctx context.Context, userID int, page int) 
 	limit := 50
 	offset := (page - 1) * limit
 
-	var totalCount int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM media WHERE user_id = $1`, userID).Scan(&totalCount)
+	totalCount, err := s.mediaRepo.Count(ctx, userID)
 	if err != nil {
-		logger.Error("Failed to count media", err)
-		return models.MediaListResponse{}, errors.NewInternalServerError("Failed to retrieve media count")
+		return models.MediaListResponse{}, err
 	}
 
 	totalPages := (totalCount + limit - 1) / limit
@@ -107,39 +80,19 @@ func (s *mediaService) ListUserMedia(ctx context.Context, userID int, page int) 
 		totalPages = 1
 	}
 
-	rows, err := s.db.Query(`
-		SELECT id, user_id, object_key, bucket_name, original_filename, file_size, mime_type, created_at, updated_at
-		FROM media
-		WHERE user_id = $1
-		ORDER BY created_at DESC
-		LIMIT $2 OFFSET $3
-	`, userID, limit, offset)
+	mediaList, err := s.mediaRepo.List(ctx, userID, limit, offset)
 	if err != nil {
-		logger.Error("Failed to query media", err)
-		return models.MediaListResponse{}, errors.NewInternalServerError("Failed to retrieve media")
+		return models.MediaListResponse{}, err
 	}
-	defer rows.Close()
 
-	var mediaList []models.Media
-	for rows.Next() {
-		var media models.Media
-		err := rows.Scan(
-			&media.ID, &media.UserID, &media.ObjectKey, &media.BucketName,
-			&media.OriginalFilename, &media.FileSize, &media.MimeType,
-			&media.CreatedAt, &media.UpdatedAt,
-		)
-		if err != nil {
-			logger.Error("Failed to scan media row", err)
-			continue
-		}
-		presignedURL, err := s.storage.GeneratePresignedDownloadURL(media.ObjectKey)
+	for i := range mediaList {
+		presignedURL, err := s.storage.GeneratePresignedDownloadURL(mediaList[i].ObjectKey)
 		if err != nil {
 			logger.Error("Failed to generate presigned URL for media", err)
-			media.URL = ""
+			mediaList[i].URL = ""
 		} else {
-			media.URL = presignedURL
+			mediaList[i].URL = presignedURL
 		}
-		mediaList = append(mediaList, media)
 	}
 
 	if mediaList == nil {
@@ -156,23 +109,9 @@ func (s *mediaService) ListUserMedia(ctx context.Context, userID int, page int) 
 }
 
 func (s *mediaService) GetByID(ctx context.Context, userID int, mediaID int) (models.Media, error) {
-	var media models.Media
-	err := s.db.QueryRow(`
-		SELECT id, user_id, object_key, bucket_name, original_filename, file_size, mime_type, created_at, updated_at
-		FROM media
-		WHERE id = $1 AND user_id = $2
-	`, mediaID, userID).Scan(
-		&media.ID, &media.UserID, &media.ObjectKey, &media.BucketName,
-		&media.OriginalFilename, &media.FileSize, &media.MimeType,
-		&media.CreatedAt, &media.UpdatedAt,
-	)
-
-	if err == sql.ErrNoRows {
-		return models.Media{}, errors.NewNotFoundError("Media")
-	}
+	media, err := s.mediaRepo.GetByID(ctx, userID, mediaID)
 	if err != nil {
-		logger.Error("Failed to query media", err)
-		return models.Media{}, errors.NewInternalServerError("Failed to retrieve media")
+		return models.Media{}, err
 	}
 
 	presignedURL, err := s.storage.GeneratePresignedDownloadURL(media.ObjectKey)
@@ -187,15 +126,9 @@ func (s *mediaService) GetByID(ctx context.Context, userID int, mediaID int) (mo
 }
 
 func (s *mediaService) GetPresignedDownloadURL(ctx context.Context, userID int, mediaID int) (models.PresignedDownloadURLResponse, error) {
-	var objectKey string
-	err := s.db.QueryRow(`SELECT object_key FROM media WHERE id = $1 AND user_id = $2`, mediaID, userID).Scan(&objectKey)
-
-	if err == sql.ErrNoRows {
-		return models.PresignedDownloadURLResponse{}, errors.NewNotFoundError("Media")
-	}
+	objectKey, err := s.mediaRepo.GetObjectKey(ctx, userID, mediaID)
 	if err != nil {
-		logger.Error("Failed to query media", err)
-		return models.PresignedDownloadURLResponse{}, errors.NewInternalServerError("Failed to retrieve media")
+		return models.PresignedDownloadURLResponse{}, err
 	}
 
 	downloadURL, err := s.storage.GeneratePresignedDownloadURL(objectKey)
@@ -206,31 +139,19 @@ func (s *mediaService) GetPresignedDownloadURL(ctx context.Context, userID int, 
 
 	return models.PresignedDownloadURLResponse{
 		DownloadURL: downloadURL,
-		ExpiresIn:   604800, // 7 days in seconds
+		ExpiresIn:   604800,
 	}, nil
 }
 
 func (s *mediaService) Delete(ctx context.Context, userID int, mediaID int) error {
-	var objectKey string
-	err := s.db.QueryRow(`SELECT object_key FROM media WHERE id = $1 AND user_id = $2`, mediaID, userID).Scan(&objectKey)
-
-	if err == sql.ErrNoRows {
-		return errors.NewNotFoundError("Media")
-	}
+	objectKey, err := s.mediaRepo.GetObjectKey(ctx, userID, mediaID)
 	if err != nil {
-		logger.Error("Failed to query media", err)
-		return errors.NewInternalServerError("Failed to retrieve media")
+		return err
 	}
 
 	if err := s.storage.DeleteObject(objectKey); err != nil {
 		logger.Error("Failed to delete object from MinIO", err)
 	}
 
-	_, err = s.db.Exec(`DELETE FROM media WHERE id = $1 AND user_id = $2`, mediaID, userID)
-	if err != nil {
-		logger.Error("Failed to delete media record", err)
-		return errors.NewInternalServerError("Failed to delete media")
-	}
-
-	return nil
+	return s.mediaRepo.Delete(ctx, userID, mediaID)
 }
