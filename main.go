@@ -19,6 +19,7 @@ import (
 	"github.com/clementhaon/sandbox-api-go/logger"
 	"github.com/clementhaon/sandbox-api-go/metrics"
 	"github.com/clementhaon/sandbox-api-go/middleware"
+	"github.com/clementhaon/sandbox-api-go/repository"
 	"github.com/clementhaon/sandbox-api-go/services"
 	"github.com/clementhaon/sandbox-api-go/storage"
 	"github.com/clementhaon/sandbox-api-go/websocket"
@@ -70,15 +71,23 @@ func main() {
 	// Auth middleware with injected JWT manager
 	authMW := middleware.NewAuthMiddleware(jwtManager)
 
+	// Initialize repositories
+	userRepo := repository.NewPostgresUserRepository(db)
+	taskRepo := repository.NewPostgresTaskRepository(db)
+	columnRepo := repository.NewPostgresColumnRepository(db)
+	timeEntryRepo := repository.NewPostgresTimeEntryRepository(db)
+	notifRepo := repository.NewPostgresNotificationRepository(db)
+	mediaRepo := repository.NewPostgresMediaRepository(db)
+
 	// Initialize services
-	authSvc := services.NewAuthService(db, jwtManager)
-	userSvc := services.NewUserService(db)
-	profileSvc := services.NewProfileService(db)
-	columnSvc := services.NewColumnService(db)
-	taskSvc := services.NewTaskService(db)
-	timeEntrySvc := services.NewTimeEntryService(db)
-	notificationSvc := services.NewNotificationService(db, wsManager)
-	mediaSvc := services.NewMediaService(db, minioStorage)
+	authSvc := services.NewAuthService(userRepo, jwtManager)
+	userSvc := services.NewUserService(userRepo)
+	profileSvc := services.NewProfileService(userRepo)
+	columnSvc := services.NewColumnService(columnRepo)
+	taskSvc := services.NewTaskService(taskRepo, columnRepo)
+	timeEntrySvc := services.NewTimeEntryService(timeEntryRepo)
+	notificationSvc := services.NewNotificationService(notifRepo, wsManager)
+	mediaSvc := services.NewMediaService(mediaRepo, minioStorage)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authSvc)
