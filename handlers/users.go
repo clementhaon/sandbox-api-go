@@ -24,7 +24,7 @@ func (h *UserHandler) ListUsers(w http.ResponseWriter, r *http.Request) error {
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	pageSize, _ := strconv.Atoi(r.URL.Query().Get("pageSize"))
 
-	params := services.UserListParams{
+	params := models.UserListParams{
 		Page:      page,
 		PageSize:  pageSize,
 		SortBy:    r.URL.Query().Get("sortBy"),

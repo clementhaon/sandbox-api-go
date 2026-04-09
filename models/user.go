@@ -141,3 +141,14 @@ type UpdateUserRequest struct {
 type UpdateUserStatusRequest struct {
 	Status string `json:"status"`
 }
+
+// UserListParams represents query parameters for listing users
+type UserListParams struct {
+	Page      int
+	PageSize  int
+	SortBy    string
+	SortOrder string
+	Search    string
+	Role      string
+	Status    string
+}
