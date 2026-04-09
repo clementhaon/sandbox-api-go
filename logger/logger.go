@@ -2,53 +2,11 @@ package logger
 
 import (
 	"context"
-	"encoding/json"
-	"io"
-	"log"
+	"log/slog"
 	"os"
-	"runtime"
-	"strconv"
 	"strings"
 	"time"
 )
-
-// LogLevel represents the severity level of a log entry
-type LogLevel string
-
-const (
-	DEBUG LogLevel = "DEBUG"
-	INFO  LogLevel = "INFO"
-	WARN  LogLevel = "WARN"
-	ERROR LogLevel = "ERROR"
-	FATAL LogLevel = "FATAL"
-)
-
-// LogEntry represents a structured log entry
-type LogEntry struct {
-	Level      LogLevel               `json:"level"`
-	Message    string                 `json:"message"`
-	Timestamp  time.Time              `json:"timestamp"`
-	RequestID  string                 `json:"request_id,omitempty"`
-	UserID     int                    `json:"user_id,omitempty"`
-	Method     string                 `json:"method,omitempty"`
-	URL        string                 `json:"url,omitempty"`
-	StatusCode int                    `json:"status_code,omitempty"`
-	Duration   time.Duration          `json:"duration,omitempty"`
-	Error      string                 `json:"error,omitempty"`
-	StackTrace string                 `json:"stack_trace,omitempty"`
-	Fields     map[string]interface{} `json:"fields,omitempty"`
-	File       string                 `json:"file,omitempty"`
-	Function   string                 `json:"function,omitempty"`
-}
-
-// Logger represents the application logger
-type Logger struct {
-	output   io.Writer
-	minLevel LogLevel
-}
-
-// Global logger instance
-var globalLogger *Logger
 
 // ContextKey type for context keys
 type ContextKey string
@@ -58,277 +16,186 @@ const (
 	UserIDKey    ContextKey = "user_id"
 )
 
-// Initialize sets up the global logger
-func Initialize() {
-	globalLogger = &Logger{
-		output:   os.Stdout,
-		minLevel: INFO,
-	}
+// Global slog logger
+var global *slog.Logger
 
-	// Set minimum level based on environment
+// Initialize sets up the global logger with a JSON handler.
+func Initialize() {
+	level := slog.LevelInfo
 	if env := os.Getenv("LOG_LEVEL"); env != "" {
 		switch strings.ToUpper(env) {
 		case "DEBUG":
-			globalLogger.minLevel = DEBUG
-		case "INFO":
-			globalLogger.minLevel = INFO
+			level = slog.LevelDebug
 		case "WARN":
-			globalLogger.minLevel = WARN
+			level = slog.LevelWarn
 		case "ERROR":
-			globalLogger.minLevel = ERROR
-		case "FATAL":
-			globalLogger.minLevel = FATAL
+			level = slog.LevelError
 		}
 	}
-}
 
-// shouldLog checks if a message should be logged based on level
-func (l *Logger) shouldLog(level LogLevel) bool {
-	levels := map[LogLevel]int{
-		DEBUG: 0,
-		INFO:  1,
-		WARN:  2,
-		ERROR: 3,
-		FATAL: 4,
-	}
-	return levels[level] >= levels[l.minLevel]
-}
-
-// log writes a log entry
-func (l *Logger) log(level LogLevel, message string, fields map[string]interface{}, ctx context.Context) {
-	if !l.shouldLog(level) {
-		return
-	}
-
-	entry := LogEntry{
+	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level:     level,
-		Message:   message,
-		Timestamp: time.Now().UTC(),
-		Fields:    fields,
-	}
-
-	// Add context information if available
-	if ctx != nil {
-		if requestID, ok := ctx.Value(RequestIDKey).(string); ok {
-			entry.RequestID = requestID
-		}
-		if userID, ok := ctx.Value(UserIDKey).(int); ok {
-			entry.UserID = userID
-		}
-	}
-
-	// Add caller information for errors and above
-	if level == ERROR || level == FATAL {
-		if pc, file, line, ok := runtime.Caller(3); ok {
-			entry.File = formatFile(file, line)
-			if fn := runtime.FuncForPC(pc); fn != nil {
-				entry.Function = fn.Name()
-			}
-		}
-	}
-
-	// Marshal and write
-	jsonData, err := json.Marshal(entry)
-	if err != nil {
-		// Fallback to standard log
-		log.Printf("Logger error: %v, Original: %s", err, message)
-		return
-	}
-
-	l.output.Write(jsonData)
-	l.output.Write([]byte("\n"))
+		AddSource: true,
+	})
+	global = slog.New(handler)
+	slog.SetDefault(global)
 }
 
-// formatFile formats file path and line number
-func formatFile(file string, line int) string {
-	// Get just the filename, not the full path
-	parts := strings.Split(file, "/")
-	if len(parts) > 0 {
-		return parts[len(parts)-1] + ":" + strconv.Itoa(line)
+func get() *slog.Logger {
+	if global == nil {
+		Initialize()
 	}
-	return file + ":" + strconv.Itoa(line)
+	return global
 }
 
-// Debug logs a debug message
+// ctxAttrs extracts request_id and user_id from context as slog attributes.
+func ctxAttrs(ctx context.Context) []slog.Attr {
+	var attrs []slog.Attr
+	if ctx == nil {
+		return attrs
+	}
+	if rid, ok := ctx.Value(RequestIDKey).(string); ok {
+		attrs = append(attrs, slog.String("request_id", rid))
+	}
+	if uid, ok := ctx.Value(UserIDKey).(int); ok {
+		attrs = append(attrs, slog.Int("user_id", uid))
+	}
+	return attrs
+}
+
+// fieldsToAttrs converts a map[string]interface{} to slog.Attr slice.
+func fieldsToAttrs(fields map[string]interface{}) []slog.Attr {
+	if len(fields) == 0 {
+		return nil
+	}
+	attrs := make([]slog.Attr, 0, len(fields))
+	for k, v := range fields {
+		attrs = append(attrs, slog.Any(k, v))
+	}
+	return attrs
+}
+
+// toArgs converts slog.Attr slices to []any for slog methods.
+func toArgs(attrSets ...[]slog.Attr) []any {
+	var args []any
+	for _, set := range attrSets {
+		for _, a := range set {
+			args = append(args, a)
+		}
+	}
+	return args
+}
+
+// --- Public API (signatures preserved for compatibility) ---
+
 func Debug(message string, fields ...map[string]interface{}) {
-	if globalLogger == nil {
-		Initialize()
-	}
-	var fieldMap map[string]interface{}
+	var f map[string]interface{}
 	if len(fields) > 0 {
-		fieldMap = fields[0]
+		f = fields[0]
 	}
-	globalLogger.log(DEBUG, message, fieldMap, nil)
+	get().LogAttrs(context.Background(), slog.LevelDebug, message, fieldsToAttrs(f)...)
 }
 
-// DebugContext logs a debug message with context
 func DebugContext(ctx context.Context, message string, fields ...map[string]interface{}) {
-	if globalLogger == nil {
-		Initialize()
-	}
-	var fieldMap map[string]interface{}
+	var f map[string]interface{}
 	if len(fields) > 0 {
-		fieldMap = fields[0]
+		f = fields[0]
 	}
-	globalLogger.log(DEBUG, message, fieldMap, ctx)
+	get().LogAttrs(ctx, slog.LevelDebug, message, append(ctxAttrs(ctx), fieldsToAttrs(f)...)...)
 }
 
-// Info logs an info message
 func Info(message string, fields ...map[string]interface{}) {
-	if globalLogger == nil {
-		Initialize()
-	}
-	var fieldMap map[string]interface{}
+	var f map[string]interface{}
 	if len(fields) > 0 {
-		fieldMap = fields[0]
+		f = fields[0]
 	}
-	globalLogger.log(INFO, message, fieldMap, nil)
+	get().LogAttrs(context.Background(), slog.LevelInfo, message, fieldsToAttrs(f)...)
 }
 
-// InfoContext logs an info message with context
 func InfoContext(ctx context.Context, message string, fields ...map[string]interface{}) {
-	if globalLogger == nil {
-		Initialize()
-	}
-	var fieldMap map[string]interface{}
+	var f map[string]interface{}
 	if len(fields) > 0 {
-		fieldMap = fields[0]
+		f = fields[0]
 	}
-	globalLogger.log(INFO, message, fieldMap, ctx)
+	get().LogAttrs(ctx, slog.LevelInfo, message, append(ctxAttrs(ctx), fieldsToAttrs(f)...)...)
 }
 
-// Warn logs a warning message
 func Warn(message string, fields ...map[string]interface{}) {
-	if globalLogger == nil {
-		Initialize()
-	}
-	var fieldMap map[string]interface{}
+	var f map[string]interface{}
 	if len(fields) > 0 {
-		fieldMap = fields[0]
+		f = fields[0]
 	}
-	globalLogger.log(WARN, message, fieldMap, nil)
+	get().LogAttrs(context.Background(), slog.LevelWarn, message, fieldsToAttrs(f)...)
 }
 
-// WarnContext logs a warning message with context
 func WarnContext(ctx context.Context, message string, fields ...map[string]interface{}) {
-	if globalLogger == nil {
-		Initialize()
-	}
-	var fieldMap map[string]interface{}
+	var f map[string]interface{}
 	if len(fields) > 0 {
-		fieldMap = fields[0]
+		f = fields[0]
 	}
-	globalLogger.log(WARN, message, fieldMap, ctx)
+	get().LogAttrs(ctx, slog.LevelWarn, message, append(ctxAttrs(ctx), fieldsToAttrs(f)...)...)
 }
 
-// Error logs an error message
 func Error(message string, err error, fields ...map[string]interface{}) {
-	if globalLogger == nil {
-		Initialize()
-	}
-	var fieldMap map[string]interface{}
+	var f map[string]interface{}
 	if len(fields) > 0 {
-		fieldMap = fields[0]
-	} else {
-		fieldMap = make(map[string]interface{})
+		f = fields[0]
 	}
+	attrs := fieldsToAttrs(f)
 	if err != nil {
-		fieldMap["error"] = err.Error()
+		attrs = append(attrs, slog.String("error", err.Error()))
 	}
-	globalLogger.log(ERROR, message, fieldMap, nil)
+	get().LogAttrs(context.Background(), slog.LevelError, message, attrs...)
 }
 
-// ErrorContext logs an error message with context
 func ErrorContext(ctx context.Context, message string, err error, fields ...map[string]interface{}) {
-	if globalLogger == nil {
-		Initialize()
-	}
-	var fieldMap map[string]interface{}
+	var f map[string]interface{}
 	if len(fields) > 0 {
-		fieldMap = fields[0]
-	} else {
-		fieldMap = make(map[string]interface{})
+		f = fields[0]
 	}
+	attrs := append(ctxAttrs(ctx), fieldsToAttrs(f)...)
 	if err != nil {
-		fieldMap["error"] = err.Error()
+		attrs = append(attrs, slog.String("error", err.Error()))
 	}
-	globalLogger.log(ERROR, message, fieldMap, ctx)
+	get().LogAttrs(ctx, slog.LevelError, message, attrs...)
 }
 
-// Fatal logs a fatal message and exits
 func Fatal(message string, err error, fields ...map[string]interface{}) {
-	if globalLogger == nil {
-		Initialize()
-	}
-	var fieldMap map[string]interface{}
+	var f map[string]interface{}
 	if len(fields) > 0 {
-		fieldMap = fields[0]
-	} else {
-		fieldMap = make(map[string]interface{})
+		f = fields[0]
 	}
+	attrs := fieldsToAttrs(f)
 	if err != nil {
-		fieldMap["error"] = err.Error()
+		attrs = append(attrs, slog.String("error", err.Error()))
 	}
-	globalLogger.log(FATAL, message, fieldMap, nil)
+	get().LogAttrs(context.Background(), slog.LevelError, message, attrs...)
 	os.Exit(1)
 }
 
-// LogHTTPRequest logs HTTP request details
+// LogHTTPRequest logs HTTP request details.
 func LogHTTPRequest(ctx context.Context, method, url string, statusCode int, duration time.Duration) {
-	if globalLogger == nil {
-		Initialize()
-	}
-
-	entry := LogEntry{
-		Level:      INFO,
-		Message:    "HTTP Request",
-		Timestamp:  time.Now().UTC(),
-		Method:     method,
-		URL:        url,
-		StatusCode: statusCode,
-		Duration:   duration,
-	}
-
-	// Add context information
-	if ctx != nil {
-		if requestID, ok := ctx.Value(RequestIDKey).(string); ok {
-			entry.RequestID = requestID
-		}
-		if userID, ok := ctx.Value(UserIDKey).(int); ok {
-			entry.UserID = userID
-		}
-	}
-
-	jsonData, err := json.Marshal(entry)
-	if err != nil {
-		log.Printf("Logger error: %v", err)
-		return
-	}
-
-	globalLogger.output.Write(jsonData)
-	globalLogger.output.Write([]byte("\n"))
+	attrs := append(ctxAttrs(ctx),
+		slog.String("method", method),
+		slog.String("url", url),
+		slog.Int("status_code", statusCode),
+		slog.String("duration", duration.String()),
+	)
+	get().LogAttrs(ctx, slog.LevelInfo, "HTTP Request", attrs...)
 }
 
-// LogDatabaseOperation logs database operation details
+// LogDatabaseOperation logs database operation details.
 func LogDatabaseOperation(ctx context.Context, operation, table string, duration time.Duration, err error) {
-	if globalLogger == nil {
-		Initialize()
-	}
-
-	fields := map[string]interface{}{
-		"operation": operation,
-		"table":     table,
-		"duration":  duration.String(),
-	}
-
-	level := INFO
-	message := "Database operation completed"
+	attrs := append(ctxAttrs(ctx),
+		slog.String("operation", operation),
+		slog.String("table", table),
+		slog.String("duration", duration.String()),
+	)
 
 	if err != nil {
-		level = ERROR
-		message = "Database operation failed"
-		fields["error"] = err.Error()
+		attrs = append(attrs, slog.String("error", err.Error()))
+		get().LogAttrs(ctx, slog.LevelError, "Database operation failed", attrs...)
+	} else {
+		get().LogAttrs(ctx, slog.LevelInfo, "Database operation completed", attrs...)
 	}
-
-	globalLogger.log(level, message, fields, ctx)
 }
