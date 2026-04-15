@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/clementhaon/sandbox-api-go/database"
 	"github.com/clementhaon/sandbox-api-go/errors"
 	"github.com/clementhaon/sandbox-api-go/logger"
 	"github.com/clementhaon/sandbox-api-go/models"
@@ -16,14 +17,19 @@ type MediaRepository interface {
 	GetByID(ctx context.Context, userID int, mediaID int) (models.Media, error)
 	GetObjectKey(ctx context.Context, userID int, mediaID int) (string, error)
 	Delete(ctx context.Context, userID int, mediaID int) error
+	WithQuerier(q database.Querier) MediaRepository
 }
 
 type postgresMediaRepo struct {
-	db *sql.DB
+	db database.Querier
 }
 
 func NewPostgresMediaRepository(db *sql.DB) MediaRepository {
 	return &postgresMediaRepo{db: db}
+}
+
+func (r *postgresMediaRepo) WithQuerier(q database.Querier) MediaRepository {
+	return &postgresMediaRepo{db: q}
 }
 
 func (r *postgresMediaRepo) Create(ctx context.Context, userID int, objectKey, bucketName, originalFilename, mimeType string, fileSize int64) (models.Media, error) {

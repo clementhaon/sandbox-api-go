@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 
+	"github.com/clementhaon/sandbox-api-go/database"
 	"github.com/clementhaon/sandbox-api-go/models"
 	"github.com/clementhaon/sandbox-api-go/repository"
 )
@@ -17,10 +18,11 @@ type ColumnService interface {
 
 type columnService struct {
 	columnRepo repository.ColumnRepository
+	txManager  database.Transactor
 }
 
-func NewColumnService(columnRepo repository.ColumnRepository) ColumnService {
-	return &columnService{columnRepo: columnRepo}
+func NewColumnService(columnRepo repository.ColumnRepository, txManager database.Transactor) ColumnService {
+	return &columnService{columnRepo: columnRepo, txManager: txManager}
 }
 
 func (s *columnService) List(ctx context.Context) ([]models.Column, error) {
@@ -62,16 +64,19 @@ func (s *columnService) Delete(ctx context.Context, id int) error {
 		return err
 	}
 
-	if err := s.columnRepo.MoveTasksToColumn(ctx, id, firstColumnID); err != nil {
-		return err
-	}
+	return s.txManager.WithTransaction(ctx, func(q database.Querier) error {
+		txRepo := s.columnRepo.WithQuerier(q)
 
-	if err := s.columnRepo.Delete(ctx, id); err != nil {
-		return err
-	}
+		if err := txRepo.MoveTasksToColumn(ctx, id, firstColumnID); err != nil {
+			return err
+		}
 
-	s.columnRepo.ReorderAfterDelete(ctx)
-	return nil
+		if err := txRepo.Delete(ctx, id); err != nil {
+			return err
+		}
+
+		return txRepo.ReorderAfterDelete(ctx)
+	})
 }
 
 func (s *columnService) Reorder(ctx context.Context, columnIDs []int) ([]models.Column, error) {

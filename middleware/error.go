@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	goerrors "errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -60,6 +61,15 @@ func ErrorMiddleware(handler ErrorHandler) http.HandlerFunc {
 // handleError processes and responds to errors
 func handleError(w http.ResponseWriter, r *http.Request, err error, requestID string) {
 	ctx := r.Context()
+
+	// Check for MaxBytesError (request body too large)
+	var maxBytesErr *http.MaxBytesError
+	if goerrors.As(err, &maxBytesErr) {
+		payloadErr := errors.NewPayloadTooLargeError().WithRequestID(requestID)
+		metrics.RecordError(string(payloadErr.Type), string(payloadErr.Code))
+		errors.WriteError(w, payloadErr)
+		return
+	}
 
 	// Check if it's already an AppError
 	if appErr, ok := errors.IsAppError(err); ok {

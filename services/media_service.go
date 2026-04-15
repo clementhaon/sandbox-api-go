@@ -21,10 +21,10 @@ type MediaService interface {
 
 type mediaService struct {
 	mediaRepo repository.MediaRepository
-	storage   *storage.Storage
+	storage   storage.StorageClient
 }
 
-func NewMediaService(mediaRepo repository.MediaRepository, storage *storage.Storage) MediaService {
+func NewMediaService(mediaRepo repository.MediaRepository, storage storage.StorageClient) MediaService {
 	return &mediaService{mediaRepo: mediaRepo, storage: storage}
 }
 

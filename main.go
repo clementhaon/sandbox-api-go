@@ -27,6 +27,89 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+type app struct {
+	config      *config.Config
+	authMW      func(middleware.ErrorHandler) http.HandlerFunc
+	rateLimiter *middleware.RateLimiter
+
+	authHandler         *handlers.AuthHandler
+	userHandler         *handlers.UserHandler
+	profileHandler      *handlers.ProfileHandler
+	columnHandler       *handlers.ColumnHandler
+	taskHandler         *handlers.TaskHandler
+	timeEntryHandler    *handlers.TimeEntryHandler
+	notificationHandler *handlers.NotificationHandler
+	mediaHandler        *handlers.MediaHandler
+	wsHandler           *handlers.WebSocketHandler
+}
+
+func (a *app) routes() http.Handler {
+	mux := http.NewServeMux()
+
+	// Public routes (no authentication required)
+	mux.HandleFunc("/", middleware.ErrorMiddleware(handleHome))
+	mux.HandleFunc("POST /auth/register", a.rateLimiter.Limit(middleware.ErrorMiddleware(a.authHandler.HandleRegister)))
+	mux.HandleFunc("POST /auth/login", a.rateLimiter.Limit(middleware.ErrorMiddleware(a.authHandler.HandleLogin)))
+	mux.HandleFunc("POST /auth/logout", middleware.ErrorMiddleware(a.authHandler.HandleLogout))
+
+	// Prometheus metrics endpoint
+	mux.Handle("/metrics", promhttp.Handler())
+
+	// WebSocket endpoint (auth via query param)
+	mux.HandleFunc("/ws", a.wsHandler.HandleWebSocket)
+
+	// Users Management Routes
+	mux.HandleFunc("GET /users", a.authMW(a.userHandler.ListUsers))
+	mux.HandleFunc("GET /users/{id}", a.authMW(a.userHandler.GetUser))
+	mux.HandleFunc("POST /users", a.authMW(a.userHandler.CreateUser))
+	mux.HandleFunc("PUT /users/{id}", a.authMW(a.userHandler.UpdateUser))
+	mux.HandleFunc("PATCH /users/{id}/status", a.authMW(a.userHandler.UpdateUserStatus))
+	mux.HandleFunc("DELETE /users/{id}", a.authMW(a.userHandler.DeleteUser))
+
+	// Columns Management Routes
+	mux.HandleFunc("GET /columns", a.authMW(a.columnHandler.ListColumns))
+	mux.HandleFunc("POST /columns", a.authMW(a.columnHandler.CreateColumn))
+	mux.HandleFunc("PUT /columns/{id}", a.authMW(a.columnHandler.UpdateColumn))
+	mux.HandleFunc("DELETE /columns/{id}", a.authMW(a.columnHandler.DeleteColumn))
+	mux.HandleFunc("PATCH /columns/reorder", a.authMW(a.columnHandler.ReorderColumns))
+
+	// Tasks Management Routes (Board)
+	mux.HandleFunc("GET /tasks/board", a.authMW(a.taskHandler.GetBoard))
+	mux.HandleFunc("GET /tasks", a.authMW(a.taskHandler.ListTasks))
+	mux.HandleFunc("GET /tasks/{id}", a.authMW(a.taskHandler.GetTask))
+	mux.HandleFunc("POST /tasks", a.authMW(a.taskHandler.CreateTask))
+	mux.HandleFunc("PUT /tasks/{id}", a.authMW(a.taskHandler.UpdateTask))
+	mux.HandleFunc("PATCH /tasks/{id}/move", a.authMW(a.taskHandler.MoveTask))
+	mux.HandleFunc("PATCH /tasks/reorder", a.authMW(a.taskHandler.ReorderTasks))
+	mux.HandleFunc("DELETE /tasks/{id}", a.authMW(a.taskHandler.DeleteTask))
+
+	// Time Entries Routes
+	mux.HandleFunc("GET /time-entries", a.authMW(a.timeEntryHandler.ListTimeEntries))
+	mux.HandleFunc("POST /time-entries", a.authMW(a.timeEntryHandler.CreateTimeEntry))
+	mux.HandleFunc("DELETE /time-entries/{id}", a.authMW(a.timeEntryHandler.DeleteTimeEntry))
+
+	// Notifications Routes
+	mux.HandleFunc("GET /notifications", a.authMW(a.notificationHandler.ListNotifications))
+	mux.HandleFunc("PATCH /notifications/read", a.authMW(a.notificationHandler.MarkNotificationsRead))
+	mux.HandleFunc("PATCH /notifications/read-all", a.authMW(a.notificationHandler.MarkAllNotificationsRead))
+	mux.HandleFunc("DELETE /notifications/{id}", a.authMW(a.notificationHandler.DeleteNotification))
+
+	// Auth & Profile Routes
+	mux.HandleFunc("GET /auth/user", a.authMW(a.authHandler.HandleGetUser))
+	mux.HandleFunc("GET /profile", a.authMW(a.profileHandler.HandleGetProfile))
+	mux.HandleFunc("PUT /profile", a.authMW(a.profileHandler.HandleUpdateProfile))
+
+	// Media Routes
+	mux.HandleFunc("POST /media/upload", a.authMW(a.mediaHandler.HandleGetPresignedUploadURL))
+	mux.HandleFunc("POST /media/confirm", a.authMW(a.mediaHandler.HandleConfirmUpload))
+	mux.HandleFunc("GET /media", a.authMW(a.mediaHandler.HandleGetUserMedia))
+	mux.HandleFunc("GET /media/{id}", a.authMW(a.mediaHandler.HandleGetMediaByID))
+	mux.HandleFunc("GET /media/{id}/download", a.authMW(a.mediaHandler.HandleGetPresignedDownloadURL))
+	mux.HandleFunc("DELETE /media/{id}", a.authMW(a.mediaHandler.HandleDeleteMedia))
+
+	return mux
+}
+
 func main() {
 	// Initialize logger first
 	logger.Initialize()
@@ -34,6 +117,12 @@ func main() {
 
 	// Initialize metrics
 	metrics.InitAppInfo("2.0.0", "dev", time.Now().Format("2006-01-02"), runtime.Version())
+
+	// Load configuration
+	cfg, err := config.Load()
+	if err != nil {
+		logger.Fatal("Failed to load configuration", fmt.Errorf("%s", err.Error()))
+	}
 
 	// Initialize the database
 	if err := database.InitDB(); err != nil {
@@ -43,22 +132,18 @@ func main() {
 	db := database.DB
 
 	// Initialize JWT manager
-	jwtSecret, err := config.RequireEnv("JWT_SECRET")
-	if err != nil {
-		logger.Fatal("JWT_SECRET environment variable is required", err)
-	}
-	jwtManager, err := auth.NewJWTManager(jwtSecret)
+	jwtManager, err := auth.NewJWTManager(cfg.JWTSecret)
 	if err != nil {
 		logger.Fatal("Failed to initialize JWT manager", fmt.Errorf("%s", err.Error()))
 	}
 
 	// Initialize MinIO storage
 	minioStorage, err := storage.NewStorage(
-		config.GetEnv("MINIO_ENDPOINT", "minio:9000"),
-		config.GetEnv("MINIO_ROOT_USER", "minioadmin"),
-		config.GetEnv("MINIO_ROOT_PASSWORD", "minioadmin123"),
-		config.GetEnv("MINIO_BUCKET", "user-uploads"),
-		config.GetEnv("MINIO_USE_SSL", "false") == "true",
+		cfg.MinioEndpoint,
+		cfg.MinioUser,
+		cfg.MinioPassword,
+		cfg.MinioBucket,
+		cfg.MinioUseSSL,
 	)
 	if err != nil {
 		logger.Fatal("Failed to initialize MinIO storage", err)
@@ -68,8 +153,15 @@ func main() {
 	wsManager := websocket.NewManager()
 	logger.Info("WebSocket manager initialized")
 
-	// Auth middleware with injected JWT manager
-	authMW := middleware.NewAuthMiddleware(jwtManager)
+	// Initialize token blacklist
+	blacklist := auth.NewTokenBlacklist()
+	defer blacklist.Stop()
+
+	// Auth middleware with injected JWT manager and blacklist
+	authMW := middleware.NewAuthMiddleware(jwtManager, blacklist)
+
+	// Initialize transaction manager
+	txManager := database.NewTxManager(db)
 
 	// Initialize repositories
 	userRepo := repository.NewPostgresUserRepository(db)
@@ -83,31 +175,37 @@ func main() {
 	authSvc := services.NewAuthService(userRepo, jwtManager)
 	userSvc := services.NewUserService(userRepo)
 	profileSvc := services.NewProfileService(userRepo)
-	columnSvc := services.NewColumnService(columnRepo)
+	columnSvc := services.NewColumnService(columnRepo, txManager)
 	taskSvc := services.NewTaskService(taskRepo, columnRepo)
-	timeEntrySvc := services.NewTimeEntryService(timeEntryRepo)
+	timeEntrySvc := services.NewTimeEntryService(timeEntryRepo, txManager)
 	notificationSvc := services.NewNotificationService(notifRepo, wsManager)
 	mediaSvc := services.NewMediaService(mediaRepo, minioStorage)
 
-	// Initialize handlers
-	authHandler := handlers.NewAuthHandler(authSvc)
-	userHandler := handlers.NewUserHandler(userSvc)
-	profileHandler := handlers.NewProfileHandler(profileSvc)
-	columnHandler := handlers.NewColumnHandler(columnSvc)
-	taskHandler := handlers.NewTaskHandler(taskSvc)
-	timeEntryHandler := handlers.NewTimeEntryHandler(timeEntrySvc)
-	notificationHandler := handlers.NewNotificationHandler(notificationSvc)
-	mediaHandler := handlers.NewMediaHandler(mediaSvc)
-	wsHandler := handlers.NewWebSocketHandler(wsManager, jwtManager)
+	// Initialize rate limiter
+	rateLimiter := middleware.NewRateLimiter(cfg.RateLimitRequests, cfg.RateLimitWindow)
+	defer rateLimiter.Stop()
 
-	// Initialize rate limiter for auth routes
-	rateLimiter := middleware.NewRateLimiter(10, time.Minute)
+	// Build application
+	a := &app{
+		config:              cfg,
+		authMW:              authMW,
+		rateLimiter:         rateLimiter,
+		authHandler:         handlers.NewAuthHandler(authSvc, jwtManager, blacklist),
+		userHandler:         handlers.NewUserHandler(userSvc),
+		profileHandler:      handlers.NewProfileHandler(profileSvc),
+		columnHandler:       handlers.NewColumnHandler(columnSvc),
+		taskHandler:         handlers.NewTaskHandler(taskSvc),
+		timeEntryHandler:    handlers.NewTimeEntryHandler(timeEntrySvc),
+		notificationHandler: handlers.NewNotificationHandler(notificationSvc),
+		mediaHandler:        handlers.NewMediaHandler(mediaSvc),
+		wsHandler:           handlers.NewWebSocketHandler(wsManager, jwtManager),
+	}
 
-	// Create the HTTP server with error handling middleware
-	mux := createMux(authMW, rateLimiter, authHandler, userHandler, profileHandler, columnHandler, taskHandler, timeEntryHandler, notificationHandler, mediaHandler, wsHandler)
+	// Create the HTTP server
+	handler := middleware.CSRFMiddleware(middleware.MaxBytesMiddleware(cfg.MaxBodySize)(a.routes()))
 	server := &http.Server{
-		Addr:         ":8080",
-		Handler:      middleware.PanicRecoveryMiddleware(middleware.RequestLoggingMiddleware(mux)),
+		Addr:         fmt.Sprintf(":%d", cfg.Port),
+		Handler:      middleware.PanicRecoveryMiddleware(middleware.RequestLoggingMiddleware(handler)),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -138,99 +236,6 @@ func main() {
 
 	logger.Info("Server shutdown completed")
 	fmt.Println("✅ Server shut down cleanly")
-}
-
-func createMux(
-	authMW func(middleware.ErrorHandler) http.HandlerFunc,
-	rateLimiter *middleware.RateLimiter,
-	authHandler *handlers.AuthHandler,
-	userHandler *handlers.UserHandler,
-	profileHandler *handlers.ProfileHandler,
-	columnHandler *handlers.ColumnHandler,
-	taskHandler *handlers.TaskHandler,
-	timeEntryHandler *handlers.TimeEntryHandler,
-	notificationHandler *handlers.NotificationHandler,
-	mediaHandler *handlers.MediaHandler,
-	wsHandler *handlers.WebSocketHandler,
-) http.Handler {
-	mux := http.NewServeMux()
-
-	// Public routes (no authentication required)
-	mux.HandleFunc("/", middleware.ErrorMiddleware(handleHome))
-	mux.HandleFunc("POST /auth/register", rateLimiter.Limit(middleware.ErrorMiddleware(authHandler.HandleRegister)))
-	mux.HandleFunc("POST /auth/login", rateLimiter.Limit(middleware.ErrorMiddleware(authHandler.HandleLogin)))
-	mux.HandleFunc("POST /auth/logout", middleware.ErrorMiddleware(authHandler.HandleLogout))
-
-	// Prometheus metrics endpoint
-	mux.Handle("/metrics", promhttp.Handler())
-
-	// WebSocket endpoint (auth via query param)
-	mux.HandleFunc("/ws", wsHandler.HandleWebSocket)
-
-	// ============================================
-	// Users Management Routes
-	// ============================================
-	mux.HandleFunc("GET /users", authMW(userHandler.ListUsers))
-	mux.HandleFunc("GET /users/{id}", authMW(userHandler.GetUser))
-	mux.HandleFunc("POST /users", authMW(userHandler.CreateUser))
-	mux.HandleFunc("PUT /users/{id}", authMW(userHandler.UpdateUser))
-	mux.HandleFunc("PATCH /users/{id}/status", authMW(userHandler.UpdateUserStatus))
-	mux.HandleFunc("DELETE /users/{id}", authMW(userHandler.DeleteUser))
-
-	// ============================================
-	// Columns Management Routes
-	// ============================================
-	mux.HandleFunc("GET /columns", authMW(columnHandler.ListColumns))
-	mux.HandleFunc("POST /columns", authMW(columnHandler.CreateColumn))
-	mux.HandleFunc("PUT /columns/{id}", authMW(columnHandler.UpdateColumn))
-	mux.HandleFunc("DELETE /columns/{id}", authMW(columnHandler.DeleteColumn))
-	mux.HandleFunc("PATCH /columns/reorder", authMW(columnHandler.ReorderColumns))
-
-	// ============================================
-	// Tasks Management Routes (Board)
-	// ============================================
-	mux.HandleFunc("GET /tasks/board", authMW(taskHandler.GetBoard))
-	mux.HandleFunc("GET /tasks", authMW(taskHandler.ListTasks))
-	mux.HandleFunc("GET /tasks/{id}", authMW(taskHandler.GetTask))
-	mux.HandleFunc("POST /tasks", authMW(taskHandler.CreateTask))
-	mux.HandleFunc("PUT /tasks/{id}", authMW(taskHandler.UpdateTask))
-	mux.HandleFunc("PATCH /tasks/{id}/move", authMW(taskHandler.MoveTask))
-	mux.HandleFunc("PATCH /tasks/reorder", authMW(taskHandler.ReorderTasks))
-	mux.HandleFunc("DELETE /tasks/{id}", authMW(taskHandler.DeleteTask))
-
-	// ============================================
-	// Time Entries Routes
-	// ============================================
-	mux.HandleFunc("GET /time-entries", authMW(timeEntryHandler.ListTimeEntries))
-	mux.HandleFunc("POST /time-entries", authMW(timeEntryHandler.CreateTimeEntry))
-	mux.HandleFunc("DELETE /time-entries/{id}", authMW(timeEntryHandler.DeleteTimeEntry))
-
-	// ============================================
-	// Notifications Routes
-	// ============================================
-	mux.HandleFunc("GET /notifications", authMW(notificationHandler.ListNotifications))
-	mux.HandleFunc("PATCH /notifications/read", authMW(notificationHandler.MarkNotificationsRead))
-	mux.HandleFunc("PATCH /notifications/read-all", authMW(notificationHandler.MarkAllNotificationsRead))
-	mux.HandleFunc("DELETE /notifications/{id}", authMW(notificationHandler.DeleteNotification))
-
-	// ============================================
-	// Auth & Profile Routes
-	// ============================================
-	mux.HandleFunc("GET /auth/user", authMW(authHandler.HandleGetUser))
-	mux.HandleFunc("GET /profile", authMW(profileHandler.HandleGetProfile))
-	mux.HandleFunc("PUT /profile", authMW(profileHandler.HandleUpdateProfile))
-
-	// ============================================
-	// Media Routes
-	// ============================================
-	mux.HandleFunc("POST /media/upload", authMW(mediaHandler.HandleGetPresignedUploadURL))
-	mux.HandleFunc("POST /media/confirm", authMW(mediaHandler.HandleConfirmUpload))
-	mux.HandleFunc("GET /media", authMW(mediaHandler.HandleGetUserMedia))
-	mux.HandleFunc("GET /media/{id}", authMW(mediaHandler.HandleGetMediaByID))
-	mux.HandleFunc("GET /media/{id}/download", authMW(mediaHandler.HandleGetPresignedDownloadURL))
-	mux.HandleFunc("DELETE /media/{id}", authMW(mediaHandler.HandleDeleteMedia))
-
-	return mux
 }
 
 func handleHome(w http.ResponseWriter, r *http.Request) error {

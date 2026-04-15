@@ -14,8 +14,8 @@ type contextKey string
 
 const UserContextKey contextKey = "user"
 
-// NewAuthMiddleware returns an AuthMiddleware function that uses the given JWTManager.
-func NewAuthMiddleware(jwtManager *auth.JWTManager) func(ErrorHandler) http.HandlerFunc {
+// NewAuthMiddleware returns an AuthMiddleware function that uses the given JWTManager and TokenBlacklist.
+func NewAuthMiddleware(jwtManager *auth.JWTManager, blacklist *auth.TokenBlacklist) func(ErrorHandler) http.HandlerFunc {
 	return func(handler ErrorHandler) http.HandlerFunc {
 		return ErrorMiddleware(func(w http.ResponseWriter, r *http.Request) error {
 			var token string
@@ -42,6 +42,12 @@ func NewAuthMiddleware(jwtManager *auth.JWTManager) func(ErrorHandler) http.Hand
 					})
 				}
 				token = tokenParts[1]
+			}
+
+			// Check if token has been revoked
+			if blacklist != nil && blacklist.IsBlacklisted(token) {
+				logger.WarnContext(r.Context(), "Revoked token used")
+				return errors.NewInvalidTokenError()
 			}
 
 			// Validate the token

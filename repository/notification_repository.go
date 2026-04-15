@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/clementhaon/sandbox-api-go/database"
 	"github.com/clementhaon/sandbox-api-go/errors"
 	"github.com/clementhaon/sandbox-api-go/logger"
 	"github.com/clementhaon/sandbox-api-go/models"
+	"github.com/lib/pq"
 )
 
 type NotificationRepository interface {
@@ -16,14 +18,19 @@ type NotificationRepository interface {
 	MarkAllRead(ctx context.Context, userID int) (int64, error)
 	Delete(ctx context.Context, userID int, id int) error
 	Create(ctx context.Context, userID int, notifType, title, message string, dataJSON []byte) error
+	WithQuerier(q database.Querier) NotificationRepository
 }
 
 type postgresNotificationRepo struct {
-	db *sql.DB
+	db database.Querier
 }
 
 func NewPostgresNotificationRepository(db *sql.DB) NotificationRepository {
 	return &postgresNotificationRepo{db: db}
+}
+
+func (r *postgresNotificationRepo) WithQuerier(q database.Querier) NotificationRepository {
+	return &postgresNotificationRepo{db: q}
 }
 
 func (r *postgresNotificationRepo) List(ctx context.Context, userID int) ([]models.Notification, error) {
@@ -55,15 +62,13 @@ func (r *postgresNotificationRepo) List(ctx context.Context, userID int) ([]mode
 }
 
 func (r *postgresNotificationRepo) MarkRead(ctx context.Context, userID int, notificationIDs []int) error {
-	for _, notifID := range notificationIDs {
-		startTime := time.Now()
-		_, err := r.db.ExecContext(ctx, `UPDATE notifications SET read = true WHERE id = $1 AND user_id = $2`, notifID, userID)
-		logger.LogDatabaseOperation(ctx, "UPDATE", "notifications", time.Since(startTime), err)
+	startTime := time.Now()
+	_, err := r.db.ExecContext(ctx, `UPDATE notifications SET read = true WHERE id = ANY($1) AND user_id = $2`, pq.Array(notificationIDs), userID)
+	logger.LogDatabaseOperation(ctx, "UPDATE", "notifications", time.Since(startTime), err)
 
-		if err != nil {
-			logger.ErrorContext(ctx, "Error marking notification as read", err)
-			return errors.NewDatabaseError().WithCause(err)
-		}
+	if err != nil {
+		logger.ErrorContext(ctx, "Error marking notifications as read", err)
+		return errors.NewDatabaseError().WithCause(err)
 	}
 	return nil
 }
@@ -78,7 +83,10 @@ func (r *postgresNotificationRepo) MarkAllRead(ctx context.Context, userID int) 
 		return 0, errors.NewDatabaseError().WithCause(err)
 	}
 
-	rowsAffected, _ := result.RowsAffected()
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, errors.NewDatabaseError().WithCause(err)
+	}
 	return rowsAffected, nil
 }
 
@@ -92,7 +100,10 @@ func (r *postgresNotificationRepo) Delete(ctx context.Context, userID int, id in
 		return errors.NewDatabaseError().WithCause(err)
 	}
 
-	rowsAffected, _ := result.RowsAffected()
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return errors.NewDatabaseError().WithCause(err)
+	}
 	if rowsAffected == 0 {
 		return errors.NewNotFoundError("Notification not found")
 	}

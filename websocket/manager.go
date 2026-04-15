@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"encoding/json"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -16,10 +17,11 @@ type Message struct {
 
 // Client represents a WebSocket client connection
 type Client struct {
-	ID     string
-	UserID int
-	Conn   *websocket.Conn
-	Send   chan []byte
+	ID        string
+	UserID    int
+	Conn      *websocket.Conn
+	Send      chan []byte
+	ReadLimit int64 // 0 means use default (4096)
 }
 
 // Manager manages WebSocket connections
@@ -94,7 +96,10 @@ func (m *Manager) SendToUser(userID int, message *Message) error {
 		select {
 		case client.Send <- data:
 		default:
-			// Client buffer full, skip
+			slog.Warn("WebSocket: message dropped, client buffer full",
+				"client_id", client.ID,
+				"user_id", client.UserID,
+			)
 		}
 	}
 
@@ -116,7 +121,10 @@ func (m *Manager) Broadcast(message *Message) error {
 			select {
 			case client.Send <- data:
 			default:
-				// Client buffer full, skip
+				slog.Warn("WebSocket: broadcast message dropped, client buffer full",
+					"client_id", client.ID,
+					"user_id", client.UserID,
+				)
 			}
 		}
 	}
@@ -180,7 +188,11 @@ func (c *Client) ReadPump(manager *Manager) {
 		c.Conn.Close()
 	}()
 
-	c.Conn.SetReadLimit(512)
+	readLimit := c.ReadLimit
+	if readLimit <= 0 {
+		readLimit = 4096
+	}
+	c.Conn.SetReadLimit(readLimit)
 	c.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	c.Conn.SetPongHandler(func(string) error {
 		c.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
@@ -191,7 +203,11 @@ func (c *Client) ReadPump(manager *Manager) {
 		_, message, err := c.Conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				// Log error if needed
+				slog.Warn("WebSocket: unexpected close error",
+					"client_id", c.ID,
+					"user_id", c.UserID,
+					"error", err.Error(),
+				)
 			}
 			break
 		}

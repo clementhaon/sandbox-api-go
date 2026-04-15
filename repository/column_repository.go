@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/clementhaon/sandbox-api-go/database"
 	"github.com/clementhaon/sandbox-api-go/errors"
 	"github.com/clementhaon/sandbox-api-go/logger"
 	"github.com/clementhaon/sandbox-api-go/models"
@@ -22,14 +23,19 @@ type ColumnRepository interface {
 	Delete(ctx context.Context, id int) error
 	ReorderAfterDelete(ctx context.Context) error
 	Reorder(ctx context.Context, columnIDs []int) error
+	WithQuerier(q database.Querier) ColumnRepository
 }
 
 type postgresColumnRepo struct {
-	db *sql.DB
+	db database.Querier
 }
 
 func NewPostgresColumnRepository(db *sql.DB) ColumnRepository {
 	return &postgresColumnRepo{db: db}
+}
+
+func (r *postgresColumnRepo) WithQuerier(q database.Querier) ColumnRepository {
+	return &postgresColumnRepo{db: q}
 }
 
 func scanColumn(row interface{ Scan(...any) error }) (models.Column, error) {
@@ -157,7 +163,10 @@ func (r *postgresColumnRepo) Delete(ctx context.Context, id int) error {
 		return errors.NewDatabaseError().WithCause(err)
 	}
 
-	rowsAffected, _ := result.RowsAffected()
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return errors.NewDatabaseError().WithCause(err)
+	}
 	if rowsAffected == 0 {
 		return errors.NewNotFoundError("Column not found")
 	}
@@ -194,7 +203,10 @@ func (r *postgresColumnRepo) Reorder(ctx context.Context, columnIDs []int) error
 			return errors.NewDatabaseError().WithCause(err)
 		}
 
-		rowsAffected, _ := result.RowsAffected()
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return errors.NewDatabaseError().WithCause(err)
+		}
 		if rowsAffected == 0 {
 			return errors.NewNotFoundError("Column not found: " + strconv.Itoa(columnID))
 		}

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 
+	"github.com/clementhaon/sandbox-api-go/database"
 	"github.com/clementhaon/sandbox-api-go/errors"
 	"github.com/clementhaon/sandbox-api-go/logger"
 	"github.com/clementhaon/sandbox-api-go/models"
@@ -17,10 +18,11 @@ type TimeEntryService interface {
 
 type timeEntryService struct {
 	timeEntryRepo repository.TimeEntryRepository
+	txManager     database.Transactor
 }
 
-func NewTimeEntryService(timeEntryRepo repository.TimeEntryRepository) TimeEntryService {
-	return &timeEntryService{timeEntryRepo: timeEntryRepo}
+func NewTimeEntryService(timeEntryRepo repository.TimeEntryRepository, txManager database.Transactor) TimeEntryService {
+	return &timeEntryService{timeEntryRepo: timeEntryRepo, txManager: txManager}
 }
 
 func (s *timeEntryService) List(ctx context.Context, taskID int) ([]models.TimeEntry, error) {
@@ -46,17 +48,21 @@ func (s *timeEntryService) Create(ctx context.Context, userID int, req models.Cr
 		return models.TimeEntry{}, errors.NewNotFoundError("Task not found")
 	}
 
-	entry, err := s.timeEntryRepo.Create(ctx, userID, req)
+	var entry models.TimeEntry
+	err = s.txManager.WithTransaction(ctx, func(q database.Querier) error {
+		txRepo := s.timeEntryRepo.WithQuerier(q)
+
+		var createErr error
+		entry, createErr = txRepo.Create(ctx, userID, req)
+		if createErr != nil {
+			return createErr
+		}
+
+		durationMinutes := req.Duration / 60
+		return txRepo.AddTrackedTime(ctx, req.TaskID, durationMinutes)
+	})
 	if err != nil {
 		return models.TimeEntry{}, err
-	}
-
-	durationMinutes := req.Duration / 60
-	if err := s.timeEntryRepo.AddTrackedTime(ctx, req.TaskID, durationMinutes); err != nil {
-		logger.WarnContext(ctx, "Error updating task tracked_time", map[string]interface{}{
-			"error":   err.Error(),
-			"task_id": req.TaskID,
-		})
 	}
 
 	logger.InfoContext(ctx, "Time entry created", map[string]interface{}{
@@ -75,17 +81,14 @@ func (s *timeEntryService) Delete(ctx context.Context, id int) error {
 		return err
 	}
 
-	if err := s.timeEntryRepo.Delete(ctx, id); err != nil {
-		return err
-	}
+	return s.txManager.WithTransaction(ctx, func(q database.Querier) error {
+		txRepo := s.timeEntryRepo.WithQuerier(q)
 
-	durationMinutes := duration / 60
-	if err := s.timeEntryRepo.SubtractTrackedTime(ctx, taskID, durationMinutes); err != nil {
-		logger.WarnContext(ctx, "Error updating task tracked_time after delete", map[string]interface{}{
-			"error":   err.Error(),
-			"task_id": taskID,
-		})
-	}
+		if err := txRepo.Delete(ctx, id); err != nil {
+			return err
+		}
 
-	return nil
+		durationMinutes := duration / 60
+		return txRepo.SubtractTrackedTime(ctx, taskID, durationMinutes)
+	})
 }
