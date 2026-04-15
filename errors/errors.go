@@ -39,6 +39,9 @@ const (
 
 	// Method errors
 	ErrMethodNotAllowed ErrorCode = "METHOD_NOT_ALLOWED"
+
+	// Payload errors
+	ErrPayloadTooLarge ErrorCode = "PAYLOAD_TOO_LARGE"
 )
 
 // ErrorType categorizes errors by their nature
@@ -202,6 +205,11 @@ func NewTooManyRequestsError() *AppError {
 // Method Errors
 func NewMethodNotAllowedError() *AppError {
 	return NewAppError(ErrMethodNotAllowed, "Method not allowed", http.StatusMethodNotAllowed, ErrorTypeClient)
+}
+
+// Payload Errors
+func NewPayloadTooLargeError() *AppError {
+	return NewAppError(ErrPayloadTooLarge, "Request body too large", http.StatusRequestEntityTooLarge, ErrorTypeClient)
 }
 
 // ErrorResponse represents the standardized error response format

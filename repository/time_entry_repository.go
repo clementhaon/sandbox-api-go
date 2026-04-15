@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/clementhaon/sandbox-api-go/database"
 	"github.com/clementhaon/sandbox-api-go/errors"
 	"github.com/clementhaon/sandbox-api-go/logger"
 	"github.com/clementhaon/sandbox-api-go/models"
@@ -18,14 +19,19 @@ type TimeEntryRepository interface {
 	GetTaskIDAndDuration(ctx context.Context, id int) (taskID int, duration int, err error)
 	Delete(ctx context.Context, id int) error
 	SubtractTrackedTime(ctx context.Context, taskID int, durationMinutes int) error
+	WithQuerier(q database.Querier) TimeEntryRepository
 }
 
 type postgresTimeEntryRepo struct {
-	db *sql.DB
+	db database.Querier
 }
 
 func NewPostgresTimeEntryRepository(db *sql.DB) TimeEntryRepository {
 	return &postgresTimeEntryRepo{db: db}
+}
+
+func (r *postgresTimeEntryRepo) WithQuerier(q database.Querier) TimeEntryRepository {
+	return &postgresTimeEntryRepo{db: q}
 }
 
 func (r *postgresTimeEntryRepo) List(ctx context.Context, taskID int) ([]models.TimeEntry, error) {
@@ -123,7 +129,10 @@ func (r *postgresTimeEntryRepo) Delete(ctx context.Context, id int) error {
 		return errors.NewDatabaseError().WithCause(err)
 	}
 
-	rowsAffected, _ := result.RowsAffected()
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return errors.NewDatabaseError().WithCause(err)
+	}
 	if rowsAffected == 0 {
 		return errors.NewNotFoundError("Time entry not found")
 	}

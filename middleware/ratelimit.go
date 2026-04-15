@@ -20,6 +20,7 @@ type RateLimiter struct {
 	visitors map[string]*visitor
 	rate     float64 // tokens per second
 	burst    int     // max tokens
+	stopCh   chan struct{}
 }
 
 // NewRateLimiter creates a rate limiter allowing maxRequests per window per IP.
@@ -28,21 +29,33 @@ func NewRateLimiter(maxRequests int, window time.Duration) *RateLimiter {
 		visitors: make(map[string]*visitor),
 		rate:     float64(maxRequests) / window.Seconds(),
 		burst:    maxRequests,
+		stopCh:   make(chan struct{}),
 	}
 	go rl.cleanup()
 	return rl
 }
 
+// Stop terminates the cleanup goroutine.
+func (rl *RateLimiter) Stop() {
+	close(rl.stopCh)
+}
+
 func (rl *RateLimiter) cleanup() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
 	for {
-		time.Sleep(time.Minute)
-		rl.mu.Lock()
-		for ip, v := range rl.visitors {
-			if time.Since(v.lastSeen) > 3*time.Minute {
-				delete(rl.visitors, ip)
+		select {
+		case <-ticker.C:
+			rl.mu.Lock()
+			for ip, v := range rl.visitors {
+				if time.Since(v.lastSeen) > 3*time.Minute {
+					delete(rl.visitors, ip)
+				}
 			}
+			rl.mu.Unlock()
+		case <-rl.stopCh:
+			return
 		}
-		rl.mu.Unlock()
 	}
 }
 

@@ -47,13 +47,7 @@ func (h *MediaHandler) HandleConfirmUpload(w http.ResponseWriter, r *http.Reques
 		return errors.NewInvalidTokenError()
 	}
 
-	var req struct {
-		ObjectKey        string `json:"object_key"`
-		OriginalFilename string `json:"original_filename"`
-		MimeType         string `json:"mime_type"`
-		BucketName       string `json:"bucket_name"`
-	}
-
+	var req models.ConfirmUploadRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return errors.NewBadRequestError("Invalid request body")
 	}

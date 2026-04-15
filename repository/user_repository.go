@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/clementhaon/sandbox-api-go/database"
 	"github.com/clementhaon/sandbox-api-go/errors"
 	"github.com/clementhaon/sandbox-api-go/logger"
 	"github.com/clementhaon/sandbox-api-go/models"
@@ -30,14 +31,20 @@ type UserRepository interface {
 
 	// Profile operations
 	UpdateProfile(ctx context.Context, userID int, firstName, lastName, avatarURL sql.NullString) error
+
+	WithQuerier(q database.Querier) UserRepository
 }
 
 type postgresUserRepo struct {
-	db *sql.DB
+	db database.Querier
 }
 
 func NewPostgresUserRepository(db *sql.DB) UserRepository {
 	return &postgresUserRepo{db: db}
+}
+
+func (r *postgresUserRepo) WithQuerier(q database.Querier) UserRepository {
+	return &postgresUserRepo{db: q}
 }
 
 const userColumns = `id, username, email, first_name, last_name, avatar_url, is_active, last_login_at, role, created_at, updated_at`
@@ -328,7 +335,10 @@ func (r *postgresUserRepo) Delete(ctx context.Context, id int) error {
 		return errors.NewDatabaseError().WithCause(err)
 	}
 
-	rowsAffected, _ := result.RowsAffected()
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return errors.NewDatabaseError().WithCause(err)
+	}
 	if rowsAffected == 0 {
 		return errors.NewNotFoundError("User not found")
 	}

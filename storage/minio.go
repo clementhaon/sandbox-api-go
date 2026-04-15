@@ -14,6 +14,14 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
+// StorageClient defines the interface for object storage operations.
+type StorageClient interface {
+	GeneratePresignedUploadURL(filename, mimeType string, userID int) (string, string, error)
+	GeneratePresignedDownloadURL(objectKey string) (string, error)
+	DeleteObject(objectKey string) error
+	GetObjectInfo(objectKey string) (*minio.ObjectInfo, error)
+}
+
 // Storage wraps a MinIO client with a default bucket.
 type Storage struct {
 	client     *minio.Client

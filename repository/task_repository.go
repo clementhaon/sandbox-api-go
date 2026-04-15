@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/clementhaon/sandbox-api-go/database"
 	"github.com/clementhaon/sandbox-api-go/errors"
 	"github.com/clementhaon/sandbox-api-go/logger"
 	"github.com/clementhaon/sandbox-api-go/models"
@@ -23,14 +24,19 @@ type TaskRepository interface {
 	Move(ctx context.Context, id int, columnID int, order int) (models.Task, error)
 	Reorder(ctx context.Context, columnID int, taskIDs []int) error
 	Delete(ctx context.Context, id int) error
+	WithQuerier(q database.Querier) TaskRepository
 }
 
 type postgresTaskRepo struct {
-	db *sql.DB
+	db database.Querier
 }
 
 func NewPostgresTaskRepository(db *sql.DB) TaskRepository {
 	return &postgresTaskRepo{db: db}
+}
+
+func (r *postgresTaskRepo) WithQuerier(q database.Querier) TaskRepository {
+	return &postgresTaskRepo{db: q}
 }
 
 func scanTaskRow(row interface{ Scan(...any) error }) (models.Task, error) {
@@ -238,16 +244,28 @@ func (r *postgresTaskRepo) Move(ctx context.Context, id int, columnID int, order
 }
 
 func (r *postgresTaskRepo) Reorder(ctx context.Context, columnID int, taskIDs []int) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		logger.ErrorContext(ctx, "Error starting transaction for reorder", err)
-		return errors.NewDatabaseError().WithCause(err)
+	// If the querier is already a transaction, use it directly.
+	// Otherwise, start a new transaction.
+	var querier database.Querier
+	var commitFn func() error
+
+	if db, ok := r.db.(*sql.DB); ok {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			logger.ErrorContext(ctx, "Error starting transaction for reorder", err)
+			return errors.NewDatabaseError().WithCause(err)
+		}
+		defer tx.Rollback()
+		querier = tx
+		commitFn = tx.Commit
+	} else {
+		querier = r.db
+		commitFn = func() error { return nil }
 	}
-	defer tx.Rollback()
 
 	for i, taskID := range taskIDs {
 		startTime := time.Now()
-		result, err := tx.ExecContext(ctx, `UPDATE tasks SET "order" = $1, updated_at = NOW() WHERE id = $2 AND column_id = $3`, i, taskID, columnID)
+		result, err := querier.ExecContext(ctx, `UPDATE tasks SET "order" = $1, updated_at = NOW() WHERE id = $2 AND column_id = $3`, i, taskID, columnID)
 		logger.LogDatabaseOperation(ctx, "UPDATE", "tasks", time.Since(startTime), err)
 
 		if err != nil {
@@ -255,13 +273,16 @@ func (r *postgresTaskRepo) Reorder(ctx context.Context, columnID int, taskIDs []
 			return errors.NewDatabaseError().WithCause(err)
 		}
 
-		rowsAffected, _ := result.RowsAffected()
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return errors.NewDatabaseError().WithCause(err)
+		}
 		if rowsAffected == 0 {
 			return errors.NewNotFoundError("Task not found in column: " + strconv.Itoa(taskID))
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := commitFn(); err != nil {
 		logger.ErrorContext(ctx, "Error committing reorder transaction", err)
 		return errors.NewDatabaseError().WithCause(err)
 	}
@@ -278,7 +299,10 @@ func (r *postgresTaskRepo) Delete(ctx context.Context, id int) error {
 		return errors.NewDatabaseError().WithCause(err)
 	}
 
-	rowsAffected, _ := result.RowsAffected()
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return errors.NewDatabaseError().WithCause(err)
+	}
 	if rowsAffected == 0 {
 		return errors.NewNotFoundError("Task not found")
 	}

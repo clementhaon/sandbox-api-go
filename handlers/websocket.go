@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -17,11 +18,21 @@ var upgrader = ws.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true // No Origin header = same-origin or non-browser client
+		}
+
 		allowedOrigins := os.Getenv("ALLOWED_ORIGINS")
 		if allowedOrigins == "" {
-			return true
+			// Default: only allow same-origin
+			u, err := url.Parse(origin)
+			if err != nil {
+				return false
+			}
+			return u.Host == r.Host
 		}
-		origin := r.Header.Get("Origin")
+
 		for _, allowed := range strings.Split(allowedOrigins, ",") {
 			if strings.TrimSpace(allowed) == origin {
 				return true
